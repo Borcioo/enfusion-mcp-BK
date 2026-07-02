@@ -70,6 +70,35 @@ async function setEntityProp(
   }
 }
 
+/**
+ * Compute SlotAI names and per-entity offsets for a given aiSpawnCount / aiSpawnOffset.
+ * count === 1 keeps the legacy plain name `${taskName}_SlotAI` (no numeric suffix) for
+ * backwards compatibility. count > 1 uses `${taskName}_SlotAI_${i}` (1-based).
+ * Offsets accumulate: SlotAI i gets offset * (i - 1), so the first SlotAI is always at
+ * zero offset (area centre) and subsequent ones step outward by `offset` each time.
+ * An invalid/unparseable offset string is treated as zero offset (no throw).
+ */
+export function slotAiPlacements(
+  taskName: string,
+  count: number,
+  offset?: string,
+): Array<{ name: string; offset: [number, number, number] }> {
+  let base: [number, number, number] = [0, 0, 0];
+  if (offset) {
+    const parts = offset.trim().split(/\s+/).map(Number);
+    if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
+      base = [parts[0]!, parts[1]!, parts[2]!];
+    }
+  }
+  const placements: Array<{ name: string; offset: [number, number, number] }> = [];
+  for (let i = 1; i <= count; i++) {
+    const name = count === 1 ? `${taskName}_SlotAI` : `${taskName}_SlotAI_${i}`;
+    const mult = i - 1;
+    placements.push({ name, offset: [base[0] * mult, base[1] * mult, base[2] * mult] });
+  }
+  return placements;
+}
+
 /** Resolve position — use provided value, or query current camera position. */
 async function resolvePosition(
   client: WorkbenchClient,
@@ -168,6 +197,19 @@ export function registerScenarioTools(server: McpServer, client: WorkbenchClient
           .string()
           .optional()
           .describe("(objective) Faction key that owns this task (e.g. 'US', 'USSR'). Optional."),
+        aiSpawnCount: z
+          .number()
+          .min(1)
+          .max(12)
+          .default(1)
+          .describe("(objective) Number of SlotAI entities to place under Layer_AI. Each spawns one AI group."),
+        aiSpawnOffset: z
+          .string()
+          .optional()
+          .describe(
+            "(objective) Offset 'x y z' applied incrementally to each SlotAI relative to the area centre, " +
+            "e.g. '5 0 0' places SlotAI_2 at +5m X."
+          ),
 
         // --- (base) params ---
         baseName: z
@@ -197,7 +239,7 @@ export function registerScenarioTools(server: McpServer, client: WorkbenchClient
       const { type } = args;
 
       if (type === "objective") {
-        const { taskType, taskName, description, position, targetPrefab, aiGroupPrefab, triggerRadius, faction } = args;
+        const { taskType, taskName, description, position, targetPrefab, aiGroupPrefab, triggerRadius, faction, aiSpawnCount, aiSpawnOffset } = args;
 
         const modeErr = requireEditMode(client, "create scenario objective");
         if (modeErr) {
@@ -220,8 +262,8 @@ export function registerScenarioTools(server: McpServer, client: WorkbenchClient
           layerTask: `${taskName}_LayerTask`,
           layerAI:   `${taskName}_Layer_AI`,
           slot:      `${taskName}_Slot`,
-          slotAI:    `${taskName}_SlotAI`,
         };
+        const slotAiPlaced = slotAiPlacements(taskName, aiSpawnCount ?? 1, aiSpawnOffset);
         const placed: string[] = [];
         const propWarnings: string[] = [];
 
@@ -252,9 +294,20 @@ export function registerScenarioTools(server: McpServer, client: WorkbenchClient
           placed.push(names.layerAI);
           await client.call("EMCP_WB_ModifyEntity", { action: "reparent", name: names.layerAI, value: names.layerTask });
 
-          await client.call("EMCP_WB_CreateEntity", { prefab: SLOT_AI_PREFAB, name: names.slotAI });
-          placed.push(names.slotAI);
-          await client.call("EMCP_WB_ModifyEntity", { action: "reparent", name: names.slotAI, value: names.layerAI });
+          for (const sa of slotAiPlaced) {
+            await client.call("EMCP_WB_CreateEntity", { prefab: SLOT_AI_PREFAB, name: sa.name });
+            placed.push(sa.name);
+            await client.call("EMCP_WB_ModifyEntity", { action: "reparent", name: sa.name, value: names.layerAI });
+            // Reparent keeps local coords at 0 0 0. "coords" on a parented entity is local-to-parent
+            // (confirmed via tests/fixtures/objective-hierarchy.layer), so a "move" here with the
+            // per-slot offset lands the entity offset from the area centre (Layer_AI/LayerTask/Area
+            // are all placed at local 0 0 0 relative to their parent, so local offset == world offset
+            // from the area centre when unrotated).
+            const [ox, oy, oz] = sa.offset;
+            if (ox !== 0 || oy !== 0 || oz !== 0) {
+              await client.call("EMCP_WB_ModifyEntity", { action: "move", name: sa.name, value: `${ox} ${oy} ${oz}` });
+            }
+          }
 
           // 6. Wire properties — Area trigger (m_fAreaRadius confirmed from game sample layers)
           await setEntityProp(client, propWarnings, names.area, "SCR_ScenarioFrameworkArea.m_fAreaRadius", String(triggerRadius));
@@ -274,9 +327,11 @@ export function registerScenarioTools(server: McpServer, client: WorkbenchClient
           // Activate only when player enters the area trigger (not on mission start)
           await setEntityProp(client, propWarnings, names.slot, `${p.slotComp}.m_eActivationType`, "ON_TRIGGER_ACTIVATION");
 
-          // 9. Wire SlotAI — group to spawn, also trigger-activated
-          await setEntityProp(client, propWarnings, names.slotAI, "SCR_ScenarioFrameworkSlotAI.m_sObjectToSpawn", aiGroupPrefab);
-          await setEntityProp(client, propWarnings, names.slotAI, "SCR_ScenarioFrameworkSlotAI.m_eActivationType", "ON_TRIGGER_ACTIVATION");
+          // 9. Wire SlotAI — group to spawn, also trigger-activated (one per placed SlotAI)
+          for (const sa of slotAiPlaced) {
+            await setEntityProp(client, propWarnings, sa.name, "SCR_ScenarioFrameworkSlotAI.m_sObjectToSpawn", aiGroupPrefab);
+            await setEntityProp(client, propWarnings, sa.name, "SCR_ScenarioFrameworkSlotAI.m_eActivationType", "ON_TRIGGER_ACTIVATION");
+          }
 
           const lines = [
             `**Objective created: ${taskName}**`,
@@ -288,7 +343,7 @@ export function registerScenarioTools(server: McpServer, client: WorkbenchClient
             `Position: ${resolvedPosition}`,
             `Trigger radius: ${triggerRadius}m`,
             `Target (SlotKill): ${targetPrefab}`,
-            `AI group (SlotAI): ${aiGroupPrefab}`,
+            `AI group (SlotAI x${slotAiPlaced.length}): ${aiGroupPrefab}`,
             faction ? `Faction: ${faction}` : "",
           ];
 
@@ -307,7 +362,7 @@ export function registerScenarioTools(server: McpServer, client: WorkbenchClient
             ``,
             `Next steps:`,
             `1. In Workbench, verify the hierarchy under ${names.area}.`,
-            `2. Add more SlotAI entities under ${names.layerAI} for additional spawn points.`,
+            `2. Use aiSpawnCount/aiSpawnOffset to place more SlotAI entities under ${names.layerAI} at creation time.`,
             `3. Use wb_entity_modify setProperty to adjust activation conditions or faction filters.`,
             `4. Save the world.`,
           );

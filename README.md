@@ -134,6 +134,7 @@ Control a running Workbench instance over TCP. Requires the handler scripts inst
 | `wb_entity_inspect` | Get entity details — properties, components, children |
 | `wb_entity_modify` | Move, rotate, rename, reparent, set/clear/get/list properties, list/add/remove array items |
 | `wb_entity_select` | Select, deselect, clear, get current selection |
+| `scenario_create` | Place a Scenario Framework objective (Area → LayerTask → Slot + Layer_AI → SlotAI×N, with `aiSpawnCount`/`aiSpawnOffset` for multiple offset AI groups) or a Conflict base (ConflictBase + patrol spawnpoints + faction spawn point) |
 | `wb_component` | Add, remove, list entity components — supports lookup by name or index (for unnamed entities) |
 | `wb_terrain` | Query terrain height and world bounds |
 | `wb_layers` | Create, delete, rename layers, set visibility/active |

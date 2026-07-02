@@ -545,3 +545,17 @@ gh pr create --repo Borcioo/enfusion-mcp-BK --title "fix: scenario objective hie
 - Faza 0: pętla `wb_diagnose→wb_launch→wb_state→wb_reload` działa na Central-Economy; wyniki środowiska zanotowane w tym pliku.
 - Faza 1: PR `fix/scenario-layer-write` zmergowany; live E2E bez `missing m_SlotTask`; TODO.md odhaczone.
 - Następny krok po zamknięciu: plan Fazy 2 („Oczy": wb_log, wb_game_state, wb_screenshot) — osobny dokument, pisany z wiedzą o realnym formacie `.layer` i zachowaniu NET API zebraną tutaj.
+
+---
+
+## Wynik wykonania (2026-07-03)
+
+**Faza 0:** zamknięta. Steam: `E:\Steam\steamapps\common\{Arma Reforger, Arma Reforger Tools, Arma Reforger Server}`. Config przez `enfusion-mcp.config.json` w rootcie forka (gitignored), `defaultMod: "Central-Economy/source"` (zagnieżdżony gproj działa przez join). MCP scope project w `D:\Projekty\ArmaReforger\.mcp.json`.
+
+**Odkrycia po drodze:**
+1. Baseline testów miał 3 upstream failures (test rot + ścieżki autora) → PR #1.
+2. Central-Economy nie kompilował się na engine 1.7.0.54: rename `BaseSerializationSaveContext`→`SaveContext`, `BaseSerializationLoadContext`→`LoadContext` → PR #1 w Borcioo/Central-Economy (kandydat do upstreamu CashewSan).
+3. **Bugi z TODO.md nie reprodukują się** na 1.7 + kompilującym się Game module. Root cause historycznych obserwacji: moduł Game się nie kompilował → klasy komponentów niedostępne dla SetVariableValue. Taski 5-6 (layer-writer) anulowane za zgodą użytkownika; zamiast tego FEAT-y aiSpawnCount/aiSpawnOffset przez istniejącą ścieżkę API → PR #2.
+4. Pak-reader MCP pada na `scripts/Game/generated/Plugins/Persistence/System/Serializers/ScriptedComponentSerializer.c` („invalid block type") → do backlogu Fazy 2+.
+5. Indeks API pokazuje sygnatury sprzed 1.7 (stale) → potwierdza priorytet odświeżenia w Fazie 5.
+6. Największy praktyczny ból sesji: brak wglądu w konsolę WB (4× ręczne wklejanie) → wb_log priorytetem Fazy 2. Log dir: `C:\Users\macie\OneDrive\Dokumenty\My Games\ArmaReforgerWorkbench\logs\logs_<timestamp>\`.

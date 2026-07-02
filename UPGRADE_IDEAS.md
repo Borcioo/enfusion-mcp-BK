@@ -249,9 +249,9 @@ After implementing any upgrade, complete **all** of the following before marking
 
 **What**: Two complementary features for the same problem:
 
-1. **Error parsing**: After `wb_play` or `wb_reload` fails due to compilation errors, parse the Workbench response to extract file path, line number, and error message, then automatically `project_read` the failing file and present the error in context with surrounding code lines.
+1. **Error parsing**: After `wb_play` or `wb_reload` fails due to compilation errors, parse the Workbench response to extract file path, line number, and error message, then automatically `project_read` the failing file and present the error in context with surrounding code lines. *(Not yet done — this is the reload-feedback follow-up task.)*
 
-2. **Log capture tool**: Add a tool that reads Workbench's script compilation output and runtime `Print()` log, so Claude can see actual error messages instead of guessing what went wrong. The Workbench NET API handler scripts (`mod/Scripts/WorkbenchGame/EnfusionMCP/`) already run inside Workbench's scripting environment and could potentially capture `Log.Info`/`Log.Error` output.
+2. ✅ **Log capture tool — DONE**: `wb_log` (`src/tools/wb-log.ts`, `src/workbench/logs.ts`) reads Workbench's `console.log`/`script.log` directly from disk (auto-discovers the newest `logs_<timestamp>` dir under `Documents/My Games/ArmaReforgerWorkbench/logs`, with OneDrive-redirected-Documents fallbacks and a `workbenchProfileDir` config override), tails it incrementally via a byte cursor, and parses `SCRIPT (E): @"file.c,line": message` compile errors with ±5 lines of source context pulled from the project tree. File-based by design — it works even when the NET API handlers themselves fail to compile, which is exactly when you need visibility most.
 
 **Why**: The `create-mod` prompt workflow (`src/prompts/create-mod.ts:143`) says "If compilation failed (errors in the Workbench console), fix with project_write." But Claude has no way to *see* those errors — it can only infer compilation failed from the lack of a success response. Auto-extracting the error location and reading the surrounding code would let it fix issues in one pass instead of 3-4 round trips.
 

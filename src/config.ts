@@ -27,6 +27,10 @@ export interface Config {
    *  Automatically set at runtime when wb_launch opens a .gproj file.
    *  Can also be set via ENFUSION_DEFAULT_MOD env var as a static fallback. */
   defaultMod?: string;
+  /** Explicit override for the Workbench profile dir (parent of logs_<timestamp> dirs).
+   *  Defaults to auto-discovery under Documents/OneDrive Documents.
+   *  Set via ENFUSION_WORKBENCH_PROFILE_DIR env var. */
+  workbenchProfileDir?: string;
 }
 
 const DEFAULT_WORKBENCH_PATH =
@@ -111,6 +115,9 @@ export function loadConfig(): Config {
   }
   if (process.env.ENFUSION_DEFAULT_MOD) {
     config.defaultMod = process.env.ENFUSION_DEFAULT_MOD;
+  }
+  if (process.env.ENFUSION_WORKBENCH_PROFILE_DIR) {
+    config.workbenchProfileDir = process.env.ENFUSION_WORKBENCH_PROFILE_DIR;
   }
 
   // Auto-derive gamePath from workbenchPath if not explicitly set

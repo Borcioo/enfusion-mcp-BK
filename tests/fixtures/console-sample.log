@@ -1,0 +1,9 @@
+  SCRIPT       : Compiling Game scripts
+   SCRIPT    (E): @"Scripts/Game/CentralEconomy/Components/CE_ItemSpawnableComponentSerializer.c,10": Overloading event 'Serialize' is not allowed
+   SCRIPT    (E): @"Scripts/Game/CentralEconomy/Systems/CE_ItemSpawningSystemSerializer.c,31": Overloading event 'Serialize' is not allowed
+   SCRIPT    (W): @"Scripts/Game/Network/ServerCommands/BanCommands.c,63": 'OnError' is obsolete: Use BackendCallback.SetOnError() instead.
+   SCRIPT    (E): Can't compile "Game" script module!
+NETWORK   (E): Failed to call not existing Net API function 'EMCP_WB_Ping'
+    RESOURCES (E): Wrong GUID/name for resource @"{0000000000000000}$profile:/CentralEconomy/CE_ItemData.conf" in property "m_sDb"
+    SCRIPT    (E): [CentralEconomy::CE_WorldValidationComponent] CE_ItemData.conf is empty! This is located in your server's profile folder, please resolve!
+GUI       (E): OverlayWidget Frame0 has invalid slot GridWidgetSlot for slot manipulation function used, expected: LayoutSlot

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import {
   parseAgrToStruct, parseAgfToStruct, parseAstToStruct,
   parseAsiToStruct, parseAwToStruct,
@@ -11,6 +11,10 @@ import {
 import { validateGraph } from "../../src/animation/validator.js";
 import { generateSuggestions, formatSuggestions } from "../../src/animation/suggestions.js";
 
+// This suite reads fixture files from the original author's local Workbench
+// profile directory. It only runs when that directory is present (e.g. on
+// the author's machine); everywhere else it is skipped at collection time
+// so nothing is read until we know the directory exists.
 const BASE = "C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/profile/TESTANIM";
 
 function readFile(name: string): string {
@@ -18,6 +22,17 @@ function readFile(name: string): string {
 }
 
 describe("M151A2 Integration", () => {
+  // Guard at collection time: bail out before any file is touched if the
+  // fixture directory isn't present on this machine. describe.skipIf alone
+  // isn't enough here because vitest still executes this factory function
+  // to collect the suite's structure even when the suite is skipped, and
+  // this suite reads fixtures at the top of the describe body (outside any
+  // it()) so that its nested describes can share parsed structs.
+  if (!existsSync(BASE)) {
+    it.skip("skipped: fixture directory not found (author-machine-only test)", () => {});
+    return;
+  }
+
   const agrContent = readFile("M151A2.agr");
   const agfContent = readFile("M151A2.agf");
   const astContent = readFile("M151A2.ast");

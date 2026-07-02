@@ -111,6 +111,7 @@ Work without Workbench running — API search, mod scaffolding, code generation,
 | `server_config` | Generate dedicated server config for local testing |
 | `mod_validate` | Validate project structure, scripts, prefabs, configs, and naming |
 | `mod_build` | Build the addon using the Workbench CLI |
+| `wb_log` | Read Workbench console/script logs from disk and parse `SCRIPT (E)` compile errors with source context — works even when NET API handlers fail to compile, since it doesn't go through the live connection |
 
 ### Live Workbench Tools
 

@@ -1,0 +1,45 @@
+GenericEntity Fixture_Test_Area : "{C72F956E4AC6A6E7}Prefabs/Systems/ScenarioFramework/Components/Area.et" {
+ components {
+  SCR_ScenarioFrameworkArea "{59E8CDC50969206E}" {
+   m_fAreaRadius 100
+  }
+ }
+ coords 100 0 100
+ {
+  GenericEntity Fixture_Test_LayerTask : "{2008B4EE6C4D528E}Prefabs/Systems/ScenarioFramework/Components/LayerTaskKill.et" {
+   components {
+    SCR_ScenarioFrameworkLayerTaskKill "{5B02763B6A6D6C4B}" {
+     m_sTaskTitle "Fixture_Test"
+     m_sTaskDescription "fixture capture"
+    }
+   }
+   coords 0 0 0
+   {
+    GenericEntity Fixture_Test_Layer_AI : "{5F9FFF4BF027B3A3}Prefabs/Systems/ScenarioFramework/Components/Layer.et" {
+     coords 0 0 0
+     {
+      GenericEntity Fixture_Test_SlotAI : "{8D43830F02C3F114}Prefabs/Systems/ScenarioFramework/Components/SlotAI.et" {
+       components {
+        SCR_ScenarioFrameworkSlotAI "{5A26B3E02AC77BA0}" {
+         m_eActivationType ON_TRIGGER_ACTIVATION
+         m_sObjectToSpawn "Prefabs/Groups/OPFOR/Group_USSR_LightFireTeam.et"
+        }
+       }
+       coords 0 0 0
+      }
+     }
+    }
+    GenericEntity Fixture_Test_Slot : "{C70DC6CBD1AAEC9A}Prefabs/Systems/ScenarioFramework/Components/SlotKill.et" {
+     components {
+      SCR_ScenarioFrameworkSlotKill "{5B02763C1EAA0BF1}" {
+       m_eActivationType ON_TRIGGER_ACTIVATION
+       m_sObjectToSpawn "Prefabs/Characters/Factions/OPFOR/USSR_Army/Character_USSR_Rifleman.et"
+       m_sWPToSpawn "{531EC45063C1F57B}Prefabs/AI/Waypoints/AIWaypoint_Wait.et"
+      }
+     }
+     coords 0 0 0
+    }
+   }
+  }
+ }
+}

@@ -2,54 +2,39 @@
 
 ## Bugs
 
-### [BUG] `scenario_create_objective` - SlotKill ends up inside Layer_AI, not as direct LayerTask child
-**Error:** `ScenarioFramework: USSR_Ambush_LayerTask could not init task due to missing m_SlotTask!`
+### [BUG] [RESOLVED] `scenario_create_objective` - SlotKill ends up inside Layer_AI, not as direct LayerTask child
+Investigated live on engine 1.7.0.54 with a compiling Game module — does not reproduce. A
+`scenario_create type=objective` run produced the correct hierarchy (Slot as a direct child of
+LayerTask, `Layer_AI`/`SlotAI` nested separately) and persisted correctly on save.
+Regression fixture: `tests/fixtures/objective-hierarchy.layer`.
 
-**Root cause:** `GetSlotTask(m_aChildren)` in `SCR_ScenarioFrameworkLayerTask` only searches *direct* children of
-LayerTask for `SCR_ScenarioFrameworkSlotTask`. The slot must NOT be nested inside Layer_AI.
+Root cause of the historical reports: the mod's Game script module failed to compile, so the
+`SCR_ScenarioFramework*` component classes were unavailable to `SetVariableValue`/reparent calls
+(likely combined with an older engine build). With a compiling Game module, `ParentEntity()` via
+`EMCP_WB_ModifyEntity` nests entities correctly in the saved `.layer` file.
 
-**Required hierarchy:**
-```
-Area
-└── LayerTask
-    ├── Slot (SlotKill / SlotClearArea / SlotDestroy)  ← direct child of LayerTask
-    └── Layer_AI
-        └── SlotAI
-```
-
-**Current state:** `wb-scenario.ts` reparents the slot to `layerTask` (fixed in code), but Workbench
-appears to rewrite the layer file with the slot inside Layer_AI anyway — the in-memory reparent
-via `EMCP_WB_ModifyEntity` may not produce the correct saved nesting.
-
-**Investigation needed:**
-- Verify whether `ParentEntity(false)` in `EMCP_WB_ModifyEntity.c` actually nests entities
-  correctly in the saved `.layer` file, or whether Workbench flattens/reorders children on save.
-- Consider writing the full hierarchy directly to the `.layer` file from the tool (like the
-  manual fix that worked before), rather than relying on individual reparent API calls.
-
-**Files:**
-- `src/tools/wb-scenario.ts` (slot reparent order fixed, may need layer-file-write approach)
-- `mod/Scripts/WorkbenchGame/EnfusionMCP/EMCP_WB_ModifyEntity.c` (reparent handler)
-- Test layer: `TESTING CLAUD/worlds/unnamed_Layers/default.layer`
-
----
-
-### [BUG] `m_eActivationType ON_TRIGGER_ACTIVATION` not settable via `setProperty`
-Enum string values cannot be set via `SetVariableValue` — `setProperty` silently fails.
-Currently must be written directly to the `.layer` file.
-If the layer-file-write approach is adopted for the hierarchy fix above, this can be solved at the same time.
+### [BUG] [RESOLVED] `m_eActivationType ON_TRIGGER_ACTIVATION` not settable via `setProperty`
+Same root cause as above — non-reproducible on engine 1.7.0.54 with a compiling Game module.
+`setProperty` correctly writes the bare enum value (`ON_TRIGGER_ACTIVATION`) and it persists on
+save. See `tests/fixtures/objective-hierarchy.layer` for the captured evidence.
 
 ---
 
 ## Features / Improvements
 
-### [FEAT] Write hierarchy directly to `.layer` file from `scenario_create_objective`
-Instead of placing entities one-by-one via API and reparenting (which has nesting persistence issues),
-generate the complete `.layer` file block and append/write it directly.
-This would also solve the `m_eActivationType` enum issue.
+### [FEAT] [DONE] Support for multiple SlotAI entities under Layer_AI
+`scenario_create type=objective` now accepts `aiSpawnCount` (1-12) to place N SlotAI entities
+under `Layer_AI`, each spawning one AI group. Single-count naming stays backwards compatible
+(`${taskName}_SlotAI`); multi-count uses `${taskName}_SlotAI_${i}`.
 
-### [FEAT] `scenario_create_objective` — add `m_sSpawnRadius` / spawn offset support
-Allow placing SlotAI at an offset from the area center, so AI spawns slightly away from the trigger edge.
+### [FEAT] [DONE] `scenario_create_objective` — add `m_sSpawnRadius` / spawn offset support
+Added `aiSpawnOffset` ('x y z') — applied incrementally to each SlotAI relative to the area
+centre (SlotAI 1 stays at the centre, SlotAI 2 is offset by one increment, etc.). Verified live:
+`move` on a reparented entity sets local (parent-relative) coords, which lands correctly relative
+to the area centre since Area/LayerTask/Layer_AI are all unrotated with zero local offset from
+each other.
 
-### [FEAT] Support for multiple SlotAI entities under Layer_AI
-Currently only one SlotAI is placed. Allow an optional `aiSpawnCount` parameter to place N SlotAIs.
+### [FEAT] [NOT NEEDED] Write hierarchy directly to `.layer` file from `scenario_create_objective`
+The nesting-persistence bug that motivated this was the compile-failure issue above, not an API
+limitation — reparenting via `EMCP_WB_ModifyEntity` already produces a correct saved hierarchy, so
+a direct `.layer`-file-write approach is unnecessary.

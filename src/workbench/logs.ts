@@ -18,9 +18,14 @@ export interface CompileError {
 /** SCRIPT (E): @"path/file.c,123": message */
 const COMPILE_ERROR_RE = /SCRIPT\s+\(E\):\s+@"([^",]+\.c),(\d+)":\s+(.+)$/;
 
-/** Strip a trailing \r left over from CRLF line endings (real Workbench logs are CRLF on Windows). */
+/**
+ * Strip trailing \r characters left over from CRLF line endings (real Workbench
+ * logs are CRLF on Windows). Strips all trailing CRs, not just one, since logs
+ * that have passed through Windows tooling (or a mis-normalized checkout) can
+ * end up with doubled "\r\r\n" sequences.
+ */
 function stripCr(line: string): string {
-  return line.endsWith("\r") ? line.slice(0, -1) : line;
+  return line.replace(/\r+$/, "");
 }
 
 export function findLatestLogDir(baseDir: string): string | null {

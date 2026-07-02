@@ -26,7 +26,10 @@ describe("parseCompileErrors", () => {
 
   it("handles real Workbench logs, which use CRLF line endings", () => {
     // Verified live: on-disk console.log files from Workbench are CRLF, not LF.
-    const crlf = SAMPLE.split("\n").join("\r\n");
+    // Normalize SAMPLE first in case it was checked out with CRLF line endings
+    // (e.g. git core.autocrlf) so we construct exactly one CRLF per line here,
+    // not a doubled "\r\r\n".
+    const crlf = SAMPLE.replace(/\r/g, "").split("\n").join("\r\n");
     const errors = parseCompileErrors(crlf);
     expect(errors).toHaveLength(2);
     expect(errors[0]!.message).toBe("Overloading event 'Serialize' is not allowed");

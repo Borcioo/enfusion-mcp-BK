@@ -238,6 +238,42 @@ export class SearchEngine {
       }
     }
 
+    // Index group-scope (global/file-scope) enums. Enfusion mostly declares
+    // enums outside of any class — they live in a group's "Enumerations"
+    // section (see doxygen-parser.ts parseGroupPage), not nested in a class.
+    // className is the group's own name so lookups/search still work the
+    // same way as for class-nested enums.
+    for (const group of this.groups) {
+      for (const enumInfo of group.enums || []) {
+        const enumEntry: EnumSearchResult = {
+          className: group.name,
+          classSource: group.source ?? "enfusion",
+          classGroup: group.name,
+          enumInfo,
+        };
+
+        const enumKey = enumInfo.name.toLowerCase();
+        let entries = this.enumIndex.get(enumKey);
+        if (!entries) {
+          entries = [];
+          this.enumIndex.set(enumKey, entries);
+        }
+        entries.push(enumEntry);
+
+        for (const val of enumInfo.values) {
+          const valKey = val.name.toLowerCase();
+          let valEntries = this.enumIndex.get(valKey);
+          if (!valEntries) {
+            valEntries = [];
+            this.enumIndex.set(valKey, valEntries);
+          }
+          if (!valEntries.some((e) => e.enumInfo.name === enumInfo.name && e.className === group.name)) {
+            valEntries.push(enumEntry);
+          }
+        }
+      }
+    }
+
     // Build component index: collect all ScriptComponent descendants
     // Use multiple strategies since scraped inheritance chains are often broken
     const componentKeys = new Set<string>();

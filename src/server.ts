@@ -80,7 +80,7 @@ export function registerTools(server: McpServer, config: Config): void {
   registerWbLaunch(server, config, wbClient);
   registerWbConnect(server, wbClient);
   registerWbDiagnose(server, wbClient);
-  registerWbReload(server, wbClient);
+  registerWbReload(server, wbClient, config);
   registerWbEditorTools(server, wbClient);
   registerWbExecuteAction(server, wbClient);
   registerWbEntityTools(server, wbClient);

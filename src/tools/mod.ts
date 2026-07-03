@@ -79,6 +79,74 @@ function runBuild(
   });
 }
 
+// ─── publish helpers ──────────────────────────────────────────────────────────
+
+interface PublishArgsInput {
+  gprojPath?: string;
+  packDir?: string;
+  version?: string;
+  changeNote?: string;
+  changeNoteFile?: string;
+  previewImage?: string;
+  screenshotsDir?: string;
+  confirmPublish?: boolean;
+}
+
+/**
+ * Build the ArmaReforgerWorkbenchSteamDiag.exe argv for packing (and, when
+ * confirmPublish is true, publishing) an addon via the Workbench CLI.
+ *
+ * Source: BI Community Wiki, Arma Reforger:Startup Parameters#Workbench
+ * (https://community.bistudio.com/wiki/Arma_Reforger:Startup_Parameters)
+ *   -wbModule=ResourceManager -packAddon [-packAddonDir <dir>]
+ *   -publishAddon [-publishAddonDir <dir>] [-publishAddonVersion <v>]
+ *   [-publishAddonChangeNote <note>] [-publishAddonChangeNoteFile <path>]
+ *   [-publishAddonPreviewImage <path>] [-publishAddonScreenshots <dir>]
+ *   [-gproj <path>]
+ *
+ * NOTE (documented limitation, same source, Arma_Reforger:Mod_Publishing_Process):
+ * -publishAddon "should be used only for publishing addon updates, and not for
+ * the initial publish" — there are NO CLI flags for Project Name, Category,
+ * Tags, License, Visibility, Summary, or Description. Those fields only exist
+ * in the Workbench GUI's "Publish Project" dialog, so a mod's *first* publish
+ * always requires a manual GUI step regardless of this tool.
+ */
+export function buildPublishArgs(input: PublishArgsInput): string[] {
+  const args: string[] = ["-wbModule=ResourceManager", "-packAddon"];
+
+  if (input.packDir) {
+    args.push("-packAddonDir", input.packDir);
+  }
+
+  if (input.confirmPublish) {
+    args.push("-publishAddon");
+    if (input.packDir) {
+      args.push("-publishAddonDir", input.packDir);
+    }
+    if (input.version) {
+      args.push("-publishAddonVersion", input.version);
+    }
+    if (input.changeNote) {
+      args.push("-publishAddonChangeNote", input.changeNote);
+    }
+    if (input.changeNoteFile) {
+      args.push("-publishAddonChangeNoteFile", input.changeNoteFile);
+    }
+    if (input.previewImage) {
+      args.push("-publishAddonPreviewImage", input.previewImage);
+    }
+    if (input.screenshotsDir) {
+      args.push("-publishAddonScreenshots", input.screenshotsDir);
+    }
+  }
+
+  if (input.gprojPath) {
+    args.push("-gproj", input.gprojPath);
+  }
+
+  return args;
+}
+
 // ─── create helpers ───────────────────────────────────────────────────────────
 
 /**
@@ -397,12 +465,13 @@ export function registerMod(
     "mod",
     {
       description:
-        "Manage Arma Reforger addons: build with the Workbench CLI, scaffold a new addon, or validate an existing addon without building. action='create' supports dryRun to preview the scaffold without writing. " +
+        "Manage Arma Reforger addons: build with the Workbench CLI, scaffold a new addon, validate an existing addon without building, or pack/publish to the Steam Workshop. action='create' supports dryRun to preview the scaffold without writing. " +
+        "action='publish' packs the addon via the Workbench CLI and, only when confirmPublish=true, also uploads via -publishAddon. IMPORTANT: a mod's first-ever publish (Project Name, Category, Tags, License, Visibility, Summary, Description) has no CLI equivalent and MUST be done once via Workbench > Publish Project GUI — this action only automates packing and subsequent version updates. " +
         "If ENFUSION_PROJECT_PATH points to a multi-mod workspace (a directory containing several addon folders), action='validate' accepts modName to scope validation to a specific addon.",
       inputSchema: {
         action: z
-          .enum(["build", "create", "validate"])
-          .describe("Action to perform: 'build' compiles the addon, 'create' scaffolds a new addon, 'validate' checks an existing addon."),
+          .enum(["build", "create", "validate", "publish"])
+          .describe("Action to perform: 'build' compiles the addon, 'create' scaffolds a new addon, 'validate' checks an existing addon, 'publish' packs (and optionally uploads) the addon via the Workbench CLI."),
 
         // ── build params ──────────────────────────────────────────────────────
         addonName: z
@@ -474,11 +543,67 @@ export function registerMod(
           .boolean()
           .default(false)
           .describe(
-            "(create) Preview what would be created/written without touching disk — returns the target paths and content instead of writing."
+            "(create) Preview what would be created/written without touching disk — returns the target paths and content instead of writing. " +
+            "(publish) Also gates 'publish': when true, only the pack+publish command is returned as a preview and nothing is executed."
+          ),
+
+        // ── publish params ────────────────────────────────────────────────────
+        packDir: z
+          .string()
+          .optional()
+          .describe("(publish) Output directory for the packed addon data (-packAddonDir). Uses the last Workbench session's directory if omitted."),
+        version: z
+          .string()
+          .optional()
+          .describe("(publish) Mod version to publish (-publishAddonVersion, e.g. '1.2.0'). If omitted, the backend auto-increments the latest published version."),
+        changeNote: z
+          .string()
+          .optional()
+          .describe("(publish) Change note text for this update (-publishAddonChangeNote)."),
+        changeNoteFile: z
+          .string()
+          .optional()
+          .describe("(publish) Path to a file containing the change note (-publishAddonChangeNoteFile). Alternative to changeNote."),
+        previewImage: z
+          .string()
+          .optional()
+          .describe("(publish) Path to a preview image, JPG or PNG, max 2MB (-publishAddonPreviewImage)."),
+        screenshotsDir: z
+          .string()
+          .optional()
+          .describe("(publish) Directory of screenshots (jpg/png/bmp) to upload (-publishAddonScreenshots)."),
+        confirmPublish: z
+          .boolean()
+          .default(false)
+          .describe(
+            "(publish) Must be explicitly set to true to actually run -publishAddon and upload to the Steam Workshop (a real, irreversible network action). " +
+            "Without it, 'publish' only builds and (unless dryRun) executes the local -packAddon step, returning the would-be publish command for review."
           ),
       },
     },
-    async ({ action, addonName, platform, outputPath, gprojPath, filterPath, name, description, prefix, pattern: patternName, projectPath, checks, modName, dryRun }) => {
+    async ({
+      action,
+      addonName,
+      platform,
+      outputPath,
+      gprojPath,
+      filterPath,
+      name,
+      description,
+      prefix,
+      pattern: patternName,
+      projectPath,
+      checks,
+      modName,
+      dryRun,
+      packDir,
+      version,
+      changeNote,
+      changeNoteFile,
+      previewImage,
+      screenshotsDir,
+      confirmPublish,
+    }) => {
 
       // ── build ──────────────────────────────────────────────────────────────
       if (action === "build") {
@@ -577,6 +702,123 @@ export function registerMod(
           const msg = e instanceof Error ? e.message : String(e);
           return {
             content: [{ type: "text", text: `Error running build: ${msg}` }],
+            isError: true,
+          };
+        }
+      }
+
+      // ── publish ────────────────────────────────────────────────────────────
+      if (action === "publish") {
+        if (!addonName) {
+          return {
+            content: [{ type: "text", text: "Missing required parameter for action 'publish': addonName" }],
+            isError: true,
+          };
+        }
+
+        const args = buildPublishArgs({
+          gprojPath,
+          packDir,
+          version,
+          changeNote,
+          changeNoteFile,
+          previewImage,
+          screenshotsDir,
+          confirmPublish,
+        });
+        const commandStr = `${WORKBENCH_DIAG_EXE} ${args.join(" ")}`;
+
+        const manualStepsNote =
+          "### First-time publish — manual GUI step required\n" +
+          "The Workbench CLI has no flags for Project Name, Category, Tags, License, Visibility, Summary, or Description. " +
+          "-publishAddon is documented (BI wiki) to be for *updating* an already-published mod, not the initial publish. " +
+          "For the first publish of this addon, open it in Workbench and use **Workbench > Publish Project** to set those fields once. " +
+          "After that, this tool can drive subsequent version updates (pack + -publishAddon) headlessly.";
+
+        const lines: string[] = [];
+        lines.push(`## Publish: ${addonName}`);
+        lines.push("");
+        lines.push(`**Command:** ${commandStr}`);
+        lines.push("");
+        lines.push(manualStepsNote);
+
+        if (dryRun) {
+          lines.push("");
+          lines.push("**Status:** DRY RUN — nothing was executed.");
+          return { content: [{ type: "text", text: lines.join("\n") }] };
+        }
+
+        if (!confirmPublish) {
+          lines.push("");
+          lines.push(
+            "**Status:** NOT PUBLISHED. Only pass confirmPublish=true when you intend to actually upload to the Steam Workshop " +
+            "(and only after the first-time GUI publish above has been done). Set confirmPublish=false/omitted (as here) to just review the command."
+          );
+          return { content: [{ type: "text", text: lines.join("\n") }] };
+        }
+
+        const exePath = findWorkbenchExe(config.workbenchPath);
+        if (!exePath) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Workbench not found at: ${config.workbenchPath}\n\n${WORKBENCH_DIAG_EXE} is required for publishing.\n\nInstall Arma Reforger Tools from Steam, or set ENFUSION_WORKBENCH_PATH to the correct path.\n\nNote: You need the Diag version (opt into "Profiling Build" beta in Steam).`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        try {
+          const startTime = Date.now();
+          const result = await runBuild(exePath, args, BUILD_TIMEOUT_MS);
+          const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+          if (result.timedOut) {
+            lines.push("");
+            lines.push(`**Status:** TIMEOUT (exceeded ${BUILD_TIMEOUT_MS / 1000}s limit)`);
+          } else if (result.exitCode === 0) {
+            lines.push("");
+            lines.push("**Status:** SUCCESS");
+            lines.push(`**Elapsed:** ${elapsed}s`);
+          } else {
+            lines.push("");
+            lines.push(`**Status:** FAILED (exit code ${result.exitCode})`);
+            lines.push(`**Elapsed:** ${elapsed}s`);
+          }
+
+          if (result.stdout.trim()) {
+            lines.push("");
+            lines.push("### Output");
+            lines.push("```");
+            const stdoutLines = result.stdout.trim().split("\n");
+            const shown = stdoutLines.slice(-100);
+            if (stdoutLines.length > 100) {
+              lines.push(`... (${stdoutLines.length - 100} lines omitted)`);
+            }
+            lines.push(shown.join("\n"));
+            lines.push("```");
+          }
+
+          if (result.stderr.trim()) {
+            lines.push("");
+            lines.push("### Errors");
+            lines.push("```");
+            const stderrLines = result.stderr.trim().split("\n");
+            const shown = stderrLines.slice(-50);
+            if (stderrLines.length > 50) {
+              lines.push(`... (${stderrLines.length - 50} lines omitted)`);
+            }
+            lines.push(shown.join("\n"));
+            lines.push("```");
+          }
+
+          return { content: [{ type: "text", text: lines.join("\n") }] };
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          return {
+            content: [{ type: "text", text: `Error running publish: ${msg}` }],
             isError: true,
           };
         }

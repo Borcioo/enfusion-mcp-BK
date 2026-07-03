@@ -113,6 +113,7 @@ Work without Workbench running — API search, mod scaffolding, code generation,
 | `server_config` | Generate dedicated server config for local testing |
 | `mod_validate` | Validate project structure, scripts, prefabs, configs, and naming. Accepts `modName` to scope validation to a specific addon in a multi-mod workspace |
 | `mod_build` | Build the addon using the Workbench CLI |
+| `mod_publish` | Pack an addon (and, with `confirmPublish=true`, upload version updates) via the Workbench CLI (`-packAddon`/`-publishAddon`). Without `confirmPublish`, returns the command as a preview and executes nothing. A mod's *first-ever* publish (name, category, tags, license, visibility, summary, description) has no CLI equivalent and always requires one manual pass through Workbench > Publish Project — this action only automates packing and subsequent version updates |
 | `wb_log` | Read Workbench console/script logs from disk and parse `SCRIPT (E)` compile errors with source context — works even when NET API handlers fail to compile, since it doesn't go through the live connection |
 
 ### Live Workbench Tools

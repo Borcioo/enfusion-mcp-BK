@@ -23,6 +23,15 @@ export interface PatternConfig {
   content: string;
 }
 
+export interface PatternCodeExample {
+  /** Short label for the operation this snippet demonstrates, e.g. "Update a text widget every frame" */
+  title: string;
+  /** One or two sentences explaining what the snippet does and where it goes */
+  description: string;
+  /** 3-15 lines of Enforce Script. Every method/class call must be verified against the API index. */
+  code: string;
+}
+
 export interface ModPattern {
   name: string;
   description: string;
@@ -31,6 +40,8 @@ export interface ModPattern {
   prefabs: PatternPrefab[];
   configs: PatternConfig[];
   instructions: string;
+  /** Optional short, verified Enforce Script snippets for common operations with this pattern. */
+  codeExamples?: PatternCodeExample[];
 }
 
 export class PatternLibrary {
@@ -84,5 +95,28 @@ export class PatternLibrary {
       lines.push(`- **${key}**: ${pattern.description}`);
     }
     return lines.join("\n");
+  }
+
+  /**
+   * Build a formatted block of verified code examples across all patterns that have them,
+   * for injection into prompt context. Returns an empty string when no pattern has examples.
+   */
+  getExamplesBlock(): string {
+    const sections: string[] = [];
+    for (const pattern of this.patterns.values()) {
+      if (!pattern.codeExamples || pattern.codeExamples.length === 0) continue;
+      for (const example of pattern.codeExamples) {
+        sections.push(
+          `#### ${pattern.name} — ${example.title}\n${example.description}\n\`\`\`c\n${example.code}\n\`\`\``
+        );
+      }
+    }
+    if (sections.length === 0) return "";
+    return [
+      "### Verified Example Snippets",
+      "These snippets use only classes/methods confirmed to exist via api_search. Use them as grounded starting points and adapt to the mod's needs — do not copy blindly, and still verify any additional method you add.",
+      "",
+      sections.join("\n\n"),
+    ].join("\n");
   }
 }

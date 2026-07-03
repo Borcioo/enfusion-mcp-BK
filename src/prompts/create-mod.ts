@@ -117,6 +117,10 @@ You don't need to create custom models. Just borrow one from the base game that 
 
 This applies to ALL physical in-game objects: interactive props, spawn points with markers, placed items, vehicles, weapons, etc.
 
+## NOTE: AUTOMATIC PITFALL WARNINGS
+
+**script_create** automatically appends a "Common pitfalls relevant to this script" section to its output when your className/description/methods match known Enfusion gotchas (e.g. using an OnFrame-style method without SetEventMask, creating a modded class, creating a component). Read and follow any pitfalls it surfaces — they come from a curated list of proven, hard-won Enfusion traps (\`data/pitfalls.json\`), not speculation.
+
 ## STEP 1: BUILD
 
 1. Use **api_search** to find the relevant Enfusion API classes AND verify that the methods you plan to use actually exist. Search every class you intend to call methods on. Do this BEFORE writing any scripts.

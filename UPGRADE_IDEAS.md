@@ -283,7 +283,7 @@ After implementing any upgrade, complete **all** of the following before marking
 
 ---
 
-### 18. Common Pitfalls Context Injection
+### ~~18. Common Pitfalls Context Injection~~ ✅ Done
 
 **What**: Maintain a structured list of known Enfusion gotchas (e.g., "scripts in Scripts/GameLib/ won't load for mods", "modded classes are global", "EntityEvent.FRAME requires SetEventMask", "`ref` keyword for reference types") and inject the relevant ones based on what the LLM is creating (detected from script_create type, api_search queries, etc.).
 
@@ -294,6 +294,8 @@ After implementing any upgrade, complete **all** of the following before marking
 **Effort**: M
 
 **Category**: Hallucination Prevention
+
+**Implementation notes**: `data/pitfalls.json` holds a 10-entry curated list (`{id, title, detail, appliesWhen: {keywords?, scriptType?, events?}}`), including the two session-specific gotchas from Faza 2/3 (`workbenchgame-handlers-no-hot-reload`, `getplayermanager-on-chimeragame`) plus proven traps like `frame-event-requires-setmask` (verified `SetEventMask` exists via `api_search`), `modded-class-is-global`, `ref-keyword-reference-types`, and `scripts-outside-module-folder`. New `src/pitfalls/loader.ts` exports `loadPitfalls`, `matchPitfalls` (OR-match across scriptType/keywords/events, dedupes), and `formatPitfalls`. Wired into `script_create` (`src/tools/script-create.ts`) — every response (dryRun preview, written, already-exists, no-project-path) appends a "Common pitfalls relevant to this script" section when the className/description/methods/scriptType match. `create-mod` prompt notes that `script_create` does this automatically. Tests: `tests/pitfalls/loader.test.ts` (15 tests — schema validation on the real JSON, matcher behavior, empty-context returns none).
 
 ---
 
@@ -440,7 +442,7 @@ After implementing any upgrade, complete **all** of the following before marking
 | ~~15~~ | ~~Prefab Introspection + Ancestry~~ | M | Modder Workflow | L1+L2 merged | DONE |
 | 16 | Compilation Error + Log Capture | M | Modder Workflow | L1+L2 merged |
 | 17 | Example Code Snippets in Patterns | M | Hallucination Prevention | L1 |
-| 18 | Common Pitfalls Context Injection | M | Hallucination Prevention | L1 |
+| ~~18~~ | ~~Common Pitfalls Context Injection~~ ✅ | M | Hallucination Prevention | L1 |
 | 19 | Validation-Driven Fix Suggestions | M | Power Feature | L2 |
 | 20 | Cross-Index "Used By" Backlinks | M | Power Feature | L2 |
 | 21 | MODPLAN as Structured Data | M | Power Feature | L2 |

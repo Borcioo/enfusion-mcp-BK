@@ -12,8 +12,22 @@ import {
 } from "../templates/script.js";
 import { validateFilename, validateEnforceIdentifier } from "../utils/safe-path.js";
 import { formatDryRun } from "../utils/dry-run.js";
+import { loadPitfalls, matchPitfalls, formatPitfalls, type PitfallContext } from "../pitfalls/loader.js";
+
+/** Extracts likely engine event names (e.g. "FRAME") referenced by method signatures like "EOnFrame". */
+function extractEvents(methods: string[] | undefined): string[] {
+  if (!methods) return [];
+  const events: string[] = [];
+  for (const m of methods) {
+    const match = m.match(/\bE?On([A-Z][A-Za-z0-9]*)\s*\(/);
+    if (match) events.push(match[1].toUpperCase());
+  }
+  return events;
+}
 
 export function registerScriptCreate(server: McpServer, config: Config, searchEngine?: SearchEngine): void {
+  const pitfalls = loadPitfalls(config.dataDir);
+
   server.registerTool(
     "script_create",
     {
@@ -94,6 +108,20 @@ export function registerScriptCreate(server: McpServer, config: Config, searchEn
           description,
         });
 
+        const effectiveMethods = methods || dynamicMethods;
+        const pitfallContext: PitfallContext = {
+          text: [description, className, parentClass, ...(effectiveMethods || [])]
+            .filter(Boolean)
+            .join(" "),
+          scriptType,
+          events: extractEvents(effectiveMethods),
+        };
+        const matchedPitfalls = matchPitfalls(pitfalls, pitfallContext);
+        const pitfallsText = formatPitfalls(matchedPitfalls);
+        const pitfallsSuffix = pitfallsText
+          ? `\n\n---\n**Common pitfalls relevant to this script:**\n${pitfallsText}`
+          : "";
+
         // If a project path is available, write the file
         if (basePath) {
           const moduleFolder = getScriptModuleFolder(scriptType as ScriptType);
@@ -106,10 +134,11 @@ export function registerScriptCreate(server: McpServer, config: Config, searchEn
               content: [
                 {
                   type: "text",
-                  text: formatDryRun(
-                    [{ path: `${moduleFolder}/${filename}`, content: code }],
-                    "Script preview — nothing was written."
-                  ),
+                  text:
+                    formatDryRun(
+                      [{ path: `${moduleFolder}/${filename}`, content: code }],
+                      "Script preview — nothing was written."
+                    ) + pitfallsSuffix,
                 },
               ],
             };
@@ -122,7 +151,7 @@ export function registerScriptCreate(server: McpServer, config: Config, searchEn
               content: [
                 {
                   type: "text",
-                  text: `File already exists: ${moduleFolder}/${filename}\n\nGenerated code (not written):\n\n\`\`\`c\n${code}\`\`\``,
+                  text: `File already exists: ${moduleFolder}/${filename}\n\nGenerated code (not written):\n\n\`\`\`c\n${code}\`\`\`${pitfallsSuffix}`,
                 },
               ],
             };
@@ -134,7 +163,7 @@ export function registerScriptCreate(server: McpServer, config: Config, searchEn
             content: [
               {
                 type: "text",
-                text: `Script created: ${moduleFolder}/${filename}\n\n\`\`\`c\n${code}\`\`\``,
+                text: `Script created: ${moduleFolder}/${filename}\n\n\`\`\`c\n${code}\`\`\`${pitfallsSuffix}`,
               },
             ],
           };
@@ -145,7 +174,7 @@ export function registerScriptCreate(server: McpServer, config: Config, searchEn
           content: [
             {
               type: "text",
-              text: `Generated script (no project path configured — not written to disk):\n\n\`\`\`c\n${code}\`\`\`\n\nSet ENFUSION_PROJECT_PATH to write files automatically.`,
+              text: `Generated script (no project path configured — not written to disk):\n\n\`\`\`c\n${code}\`\`\`\n\nSet ENFUSION_PROJECT_PATH to write files automatically.${pitfallsSuffix}`,
             },
           ],
         };

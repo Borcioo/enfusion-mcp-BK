@@ -10,6 +10,7 @@ import {
   type ConfigType,
 } from "../templates/config.js";
 import { validateFilename } from "../utils/safe-path.js";
+import { formatDryRun } from "../utils/dry-run.js";
 
 export function registerConfigCreate(
   server: McpServer,
@@ -19,7 +20,7 @@ export function registerConfigCreate(
     "config_create",
     {
       description:
-        "Create a config (.conf) file for an Arma Reforger mod. Generates faction definitions, mission headers, entity catalogs, and editor placeables in valid Enfusion text format.",
+        "Create a config (.conf) file for an Arma Reforger mod. Generates faction definitions, mission headers, entity catalogs, and editor placeables in valid Enfusion text format. Supports dryRun to preview without writing.",
       inputSchema: {
         configType: z
           .enum(["mission-header", "faction", "entity-catalog", "editor-placeables"])
@@ -90,6 +91,12 @@ export function registerConfigCreate(
           .string()
           .optional()
           .describe("Addon root path. Uses configured default if omitted."),
+        dryRun: z
+          .boolean()
+          .default(false)
+          .describe(
+            "Preview what would be created/written without touching disk — returns the target paths and content instead of writing."
+          ),
       },
     },
     async ({
@@ -109,6 +116,7 @@ export function registerConfigCreate(
       prefabRefs,
       categoryName,
       projectPath,
+      dryRun,
     }) => {
       const basePath = projectPath || config.projectPath;
 
@@ -138,6 +146,20 @@ export function registerConfigCreate(
           const filename = getConfigFilename(name);
           const targetDir = resolve(basePath, subdir);
           const targetPath = join(targetDir, filename);
+
+          if (dryRun) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: formatDryRun(
+                    [{ path: `${subdir}/${filename}`, content }],
+                    "Config preview — nothing was written."
+                  ),
+                },
+              ],
+            };
+          }
 
           mkdirSync(targetDir, { recursive: true });
 

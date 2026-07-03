@@ -102,12 +102,12 @@ Work without Workbench running — API search, mod scaffolding, code generation,
 | `asset_search` | Search game assets by name across loose files and `.pak` archives |
 | `project_browse` | List files in a mod project directory |
 | `project_read` | Read any project file |
-| `project_write` | Write or update project files |
-| `mod_create` | Scaffold a complete addon with directory structure and `.gproj` |
-| `script_create` | Generate Enforce Script (`.c`) files — 7 types: component, gamemode, action, entity, manager, modded, basic. Auto-fetches overridable parent methods from API index when `parentClass` is specified |
-| `prefab_create` | Generate Entity Template (`.et`) prefabs — 7 types: character, vehicle, weapon, spawnpoint, gamemode, interactive, generic |
-| `layout_create` | Generate UI layout (`.layout`) files — 5 types: hud, menu, dialog, list, custom |
-| `config_create` | Generate config files — factions, missions, entity catalogs, editor placeables |
+| `project_write` | Write or update project files (supports `dryRun` to preview without writing) |
+| `mod_create` | Scaffold a complete addon with directory structure and `.gproj` (supports `dryRun` to preview without writing) |
+| `script_create` | Generate Enforce Script (`.c`) files — 7 types: component, gamemode, action, entity, manager, modded, basic. Auto-fetches overridable parent methods from API index when `parentClass` is specified (supports `dryRun` to preview without writing) |
+| `prefab_create` | Generate Entity Template (`.et`) prefabs — 7 types: character, vehicle, weapon, spawnpoint, gamemode, interactive, generic (supports `dryRun` to preview without writing) |
+| `layout_create` | Generate UI layout (`.layout`) files — 5 types: hud, menu, dialog, list, custom (supports `dryRun` to preview without writing) |
+| `config_create` | Generate config files — factions, missions, entity catalogs, editor placeables (supports `dryRun` to preview without writing) |
 | `server_config` | Generate dedicated server config for local testing |
 | `mod_validate` | Validate project structure, scripts, prefabs, configs, and naming |
 | `mod_build` | Build the addon using the Workbench CLI |

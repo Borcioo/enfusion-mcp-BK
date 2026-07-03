@@ -11,13 +11,14 @@ import {
   type WidgetDef,
 } from "../templates/layout.js";
 import { validateFilename } from "../utils/safe-path.js";
+import { formatDryRun } from "../utils/dry-run.js";
 
 export function registerLayoutCreate(server: McpServer, config: Config): void {
   server.registerTool(
     "layout_create",
     {
       description:
-        "Create a UI layout (.layout) file for an Arma Reforger mod. Generates a properly structured layout with widgets in valid Enfusion text serialization format. Use for HUD elements, menus, dialogs, and custom UI.",
+        "Create a UI layout (.layout) file for an Arma Reforger mod. Generates a properly structured layout with widgets in valid Enfusion text serialization format. Use for HUD elements, menus, dialogs, and custom UI. Supports dryRun to preview without writing.",
       inputSchema: {
         name: z
           .string()
@@ -83,9 +84,15 @@ export function registerLayoutCreate(server: McpServer, config: Config): void {
           .string()
           .optional()
           .describe("Addon root path. Uses configured default if omitted."),
+        dryRun: z
+          .boolean()
+          .default(false)
+          .describe(
+            "Preview what would be created/written without touching disk — returns the target paths and content instead of writing."
+          ),
       },
     },
-    async ({ name, layoutType, rootWidgetType, anchor, offset, widgets, description, projectPath }) => {
+    async ({ name, layoutType, rootWidgetType, anchor, offset, widgets, description, projectPath, dryRun }) => {
       const basePath = projectPath || config.projectPath;
 
       try {
@@ -106,6 +113,20 @@ export function registerLayoutCreate(server: McpServer, config: Config): void {
           const filename = getLayoutFilename(name);
           const targetDir = resolve(basePath, subdir);
           const targetPath = join(targetDir, filename);
+
+          if (dryRun) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: formatDryRun(
+                    [{ path: `${subdir}/${filename}`, content }],
+                    "Layout preview — nothing was written."
+                  ),
+                },
+              ],
+            };
+          }
 
           mkdirSync(targetDir, { recursive: true });
 

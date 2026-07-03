@@ -11,13 +11,14 @@ import {
   type ScriptType,
 } from "../templates/script.js";
 import { validateFilename, validateEnforceIdentifier } from "../utils/safe-path.js";
+import { formatDryRun } from "../utils/dry-run.js";
 
 export function registerScriptCreate(server: McpServer, config: Config, searchEngine?: SearchEngine): void {
   server.registerTool(
     "script_create",
     {
       description:
-        "Create a new Enforce Script (.c) file for an Arma Reforger mod. Generates a properly structured script from a template with correct class hierarchy and method stubs. When parentClass is specified and no explicit methods are given, automatically looks up overridable methods from the API index.",
+        "Create a new Enforce Script (.c) file for an Arma Reforger mod. Generates a properly structured script from a template with correct class hierarchy and method stubs. When parentClass is specified and no explicit methods are given, automatically looks up overridable methods from the API index. Supports dryRun to preview without writing.",
       inputSchema: {
         className: z
           .string()
@@ -50,9 +51,15 @@ export function registerScriptCreate(server: McpServer, config: Config, searchEn
           .string()
           .optional()
           .describe("Addon root path. Uses configured default if omitted."),
+        dryRun: z
+          .boolean()
+          .default(false)
+          .describe(
+            "Preview what would be created/written without touching disk — returns the target paths and content instead of writing."
+          ),
       },
     },
-    async ({ className, scriptType, parentClass, methods, description, projectPath }) => {
+    async ({ className, scriptType, parentClass, methods, description, projectPath, dryRun }) => {
       const basePath = projectPath || config.projectPath;
 
       try {
@@ -93,6 +100,20 @@ export function registerScriptCreate(server: McpServer, config: Config, searchEn
           const filename = getScriptFilename(className);
           const targetDir = resolve(basePath, moduleFolder);
           const targetPath = join(targetDir, filename);
+
+          if (dryRun) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: formatDryRun(
+                    [{ path: `${moduleFolder}/${filename}`, content: code }],
+                    "Script preview — nothing was written."
+                  ),
+                },
+              ],
+            };
+          }
 
           mkdirSync(targetDir, { recursive: true });
 

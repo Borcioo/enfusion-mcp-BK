@@ -6,13 +6,14 @@ import { dirname } from "node:path";
 import type { Config } from "../config.js";
 import { validateProjectPath } from "../utils/safe-path.js";
 import { listDirectory, formatSize } from "../utils/dir-listing.js";
+import { formatDryRun } from "../utils/dry-run.js";
 
 export function registerProject(server: McpServer, config: Config): void {
   server.registerTool(
     "project",
     {
       description:
-        "Browse, read, or write files in an Arma Reforger Workbench project directory. Use action='browse' to list files, action='read' to read a file, action='write' to write a file.",
+        "Browse, read, or write files in an Arma Reforger Workbench project directory. Use action='browse' to list files, action='read' to read a file, action='write' to write a file. action='write' supports dryRun to preview without writing.",
       inputSchema: {
         action: z
           .enum(["browse", "read", "write"])
@@ -45,9 +46,15 @@ export function registerProject(server: McpServer, config: Config): void {
           .describe(
             "Absolute path to the project directory. Uses configured default if omitted."
           ),
+        dryRun: z
+          .boolean()
+          .default(false)
+          .describe(
+            "(write) Preview what would be written without touching disk — returns the target path and content instead of writing. No effect on browse/read."
+          ),
       },
     },
-    async ({ action, path: inputPath, pattern, content, createDirectories, projectPath }) => {
+    async ({ action, path: inputPath, pattern, content, createDirectories, projectPath, dryRun }) => {
       const basePath = projectPath || config.projectPath;
 
       if (!basePath) {
@@ -155,6 +162,20 @@ export function registerProject(server: McpServer, config: Config): void {
         try {
           const fullPath = validateProjectPath(basePath, inputPath);
           const shouldCreateDirs = createDirectories !== false;
+
+          if (dryRun) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: formatDryRun(
+                    [{ path: inputPath, content }],
+                    "Write preview — nothing was written."
+                  ),
+                },
+              ],
+            };
+          }
 
           if (shouldCreateDirs) {
             mkdirSync(dirname(fullPath), { recursive: true });

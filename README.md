@@ -184,7 +184,8 @@ Config can also be loaded from `~/.enfusion-mcp/config.json`. Environment variab
 
 `ENFUSION_PROJECT_PATH` can point at either a single addon (legacy behavior — the directory itself contains the `.gproj`) or a workspace directory containing several addon folders. In workspace mode:
 
-- Pass `modName` to `project` (browse/read/write), `mod` (`action='validate'`), `game_duplicate`, `server_config`, and `animation_graph` to scope the call to a specific addon folder.
+- Pass `modName` to `project` (browse/read/write), `mod` (`action='validate'`), `game_duplicate`, and `animation_graph` to scope the call to a specific addon folder (filesystem path resolved via `resolveAddonDir`).
+- `server_config` also accepts `modName`, but it isn't a directory-scoping parameter there — it's the addon ID string written into the generated `server.json`'s mod list, not a filesystem path lookup.
 - `project browse` at the workspace root with no `modName` and no `path` lists the discovered addon folders instead of doing a plain file listing.
 - If `modName` is omitted, tools fall back to `ENFUSION_DEFAULT_MOD` (or the raw configured `projectPath` if that isn't set either), so single-mod setups keep working unchanged.
 - Addon detection also handles layouts where the `.gproj` lives one level below the addon folder (e.g. `Central-Economy/source/addon.gproj`), not just at the addon root.

@@ -866,6 +866,13 @@ export function registerMod(
       } else if (config.defaultMod) {
         basePath = resolveAddonDir(config.projectPath, config.defaultMod) ?? config.projectPath;
       } else {
+        // Deliberate exception: when neither modName nor defaultMod is set, this falls
+        // through to the raw config.projectPath rather than auto-detecting the first
+        // .gproj addon (which is what game-duplicate.ts / wb-entity-duplicate.ts do via
+        // resolveAddonDir(projectPath) with no modName). That auto-detect scans child
+        // directories for a .gproj, which would break the legacy "single addon lives
+        // directly at projectPath, no multi-mod subfolders" layout. Keeping the plain
+        // fallback here preserves backward compatibility for that layout.
         basePath = config.projectPath;
       }
 

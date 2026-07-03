@@ -172,6 +172,25 @@ describe("project modName support", () => {
     expect(existsSync(join(TEST_DIR, "Scripts", "Game", "SM_New.c"))).toBe(true);
   });
 
+  it("defaultMod set to a nested-source addon (Central-Economy layout): root browse enters the addon, not the addon list", async () => {
+    write("Central-Economy/source/addon.gproj", "GameProject {}");
+    write("Central-Economy/source/Scripts/Game/CE_Test.c", "class CE_Test {}");
+    write("OtherMod/OtherMod.gproj", "GameProject {}");
+
+    const { server, handlers } = makeFakeServer();
+    registerProject(server, makeConfig({ defaultMod: "Central-Economy" }));
+    const project = handlers.get("project")!;
+
+    const result = await project({ action: "browse" });
+    const text = getText(result);
+
+    // Should browse INTO the resolved Central-Economy addon (contains "source"),
+    // not fall back to listing the workspace's addon folders.
+    expect(text).toContain("source");
+    expect(text).not.toContain("Addons found");
+    expect(text).not.toContain("OtherMod");
+  });
+
   it("regression: no modName + defaultMod configured preserves old projectPath-based behavior", async () => {
     write("SingleMod.gproj", "GameProject {}");
     write("Scripts/Game/SM_Test.c", "class SM_Test {}");

@@ -91,6 +91,13 @@ export function registerProject(server: McpServer, config: Config): void {
       } else if (config.defaultMod) {
         basePath = resolveAddonDir(config.projectPath, config.defaultMod) ?? config.projectPath;
       } else {
+        // Deliberate exception: when neither modName nor defaultMod is set, this falls
+        // through to the raw config.projectPath rather than auto-detecting the first
+        // .gproj addon (which is what game-duplicate.ts / wb-entity-duplicate.ts do via
+        // resolveAddonDir(projectPath) with no modName). That auto-detect scans child
+        // directories for a .gproj, which would break the legacy "single addon lives
+        // directly at projectPath, no multi-mod subfolders" layout. Keeping the plain
+        // fallback here preserves backward compatibility for that layout.
         basePath = config.projectPath;
       }
 
@@ -112,9 +119,19 @@ export function registerProject(server: McpServer, config: Config): void {
           const isRootBrowse = !subPath || subPath === ".";
 
           // Multi-mod workspace discovery: browsing the root with no modName/projectPath
-          // override and no .gproj of its own (i.e. basePath isn't itself an addon) lists
-          // the addon folders found under the workspace instead of a plain file listing.
-          if (isRootBrowse && !modName && !projectPath && !findGprojDirect(basePath)) {
+          // override lists the addon folders found under the workspace instead of a plain
+          // file listing — but only when basePath is still the raw, unscoped workspace root
+          // (i.e. defaultMod/modName did NOT already resolve basePath to a specific addon).
+          // We gate on `basePath === config.projectPath` rather than re-deriving "is this an
+          // addon" via findGprojDirect on the already-resolved basePath: for nested-source
+          // layouts (e.g. Central-Economy/source/addon.gproj resolved via defaultMod),
+          // findGprojDirect(basePath) wrongly returns null even though basePath IS a real,
+          // already-resolved addon — which used to cause a bogus fall-through to the addon list.
+          // The findGprojDirect(basePath) check is still needed for the legacy case where a
+          // single addon's .gproj sits directly at the (unscoped) workspace root with no
+          // defaultMod configured — that must keep browsing the root itself, not list addons.
+          const isUnscopedWorkspaceRoot = basePath === config.projectPath;
+          if (isRootBrowse && !modName && !projectPath && isUnscopedWorkspaceRoot && !findGprojDirect(basePath)) {
             const addons = listAddons(config.projectPath);
             if (addons.length > 0) {
               const lines: string[] = [];

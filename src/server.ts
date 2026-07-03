@@ -65,8 +65,8 @@ export function registerTools(server: McpServer, config: Config): void {
   registerScriptCheck(server, searchEngine);
   registerWikiSearch(server, searchEngine);
   registerWikiRead(server, searchEngine);
-  registerProject(server, config);
-  registerProjectPatch(server, config);
+  registerProject(server, config, searchEngine);
+  registerProjectPatch(server, config, searchEngine);
   registerModPlan(server, config);
 
   // Phase 1 tools

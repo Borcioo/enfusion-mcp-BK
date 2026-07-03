@@ -401,7 +401,9 @@ After implementing any upgrade, complete **all** of the following before marking
 
 ## Tier 3: Larger Effort, High Impact
 
-### 25. Cross-Reference Validation on Write
+### 25. Cross-Reference Validation on Write — DONE
+
+**Status**: Implemented on branch `feat/cross-ref-validation`. `src/utils/script-validate.ts` extracts `ClassName.Method(` call sites via regex, validates against the offline API index (reusing `checkScript`/`SearchEngine.hasClass`/`getInheritedMembers` and the fuzzy "did you mean" infra from `script_check`), and returns capped, non-blocking warning strings. Wired into `project` (write action) and `project_patch` in `src/tools/project.ts` / `src/tools/project-patch.ts` — warnings are appended to the success response text; the write/patch always happens regardless. False-positive avoidance: only classes present in the base API index are checked at all (mod-local classes are never in the index, so they're naturally excluded); classes/`modded class` re-declared in the same file are additionally excluded via `extractLocalDeclarations` (covers the case of a mod adding a new method to an existing indexed class); a short allow-list skips Script built-ins/idioms (`Print`, `Math`, `string`, `super`, `Cast`, `ToString`, `Format`). Tests: `tests/utils/script-validate.test.ts`, `tests/tools/project-write-validation.test.ts`.
 
 **What**: When `project_write` writes a `.c` script, run a lightweight static check: extract class references and method calls via regex, verify them against the API index. Return warnings inline ("Warning: `HitZone.SetHealth()` not found in API — did you mean `SCR_CharacterDamageManagerComponent.FullHeal()`?").
 

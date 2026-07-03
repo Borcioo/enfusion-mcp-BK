@@ -38,6 +38,7 @@ import { registerWbValidate } from "./tools/wb-validate.js";
 import { registerWbState } from "./tools/wb-state.js";
 import { registerWbGameState } from "./tools/wb-game-state.js";
 import { registerWbLog } from "./tools/wb-log.js";
+import { registerWbScreenshot } from "./tools/wb-screenshot.js";
 import { registerGameBrowse } from "./tools/game-browse.js";
 import { registerGameRead } from "./tools/game-read.js";
 import { registerAssetSearch } from "./tools/asset-search.js";
@@ -98,6 +99,7 @@ export function registerTools(server: McpServer, config: Config): void {
   registerWbState(server, wbClient);
   registerWbGameState(server, wbClient);
   registerWbLog(server, config);
+  registerWbScreenshot(server);
   registerScenarioTools(server, wbClient);
   registerScenarioCreate(server, config);
 

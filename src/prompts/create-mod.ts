@@ -4,6 +4,7 @@ import type { PatternLibrary } from "../patterns/loader.js";
 
 export function registerCreateModPrompt(server: McpServer, patterns: PatternLibrary): void {
   const patternList = patterns.getSummary();
+  const examplesBlock = patterns.getExamplesBlock();
 
   server.registerPrompt(
     "create-mod",
@@ -180,7 +181,8 @@ If Workbench integration failed (e.g., Workbench not installed), say so explicit
 IMPORTANT: Do NOT ask the user to choose a mod pattern and do NOT show them a list of patterns. Just interpret their description and pick the best pattern silently. If no pattern fits, use no pattern.
 
 Available patterns for internal reference (NEVER show this to the user):
-${patternList}`,
+${patternList}
+${examplesBlock}`,
           },
         },
       ],

@@ -269,7 +269,7 @@ After implementing any upgrade, complete **all** of the following before marking
 
 ---
 
-### 17. Example Code Snippets in Patterns
+### ~~17. Example Code Snippets in Patterns~~ ✅ Done
 
 **What**: Expand pattern JSON files to include `codeExamples` — short, complete, working Enfusion code snippets (3-15 lines) for common operations within that pattern. Inject these into the create-mod prompt context when the pattern is selected.
 
@@ -280,6 +280,8 @@ After implementing any upgrade, complete **all** of the following before marking
 **Effort**: M (writing correct snippets requires Enfusion domain knowledge)
 
 **Category**: Hallucination Prevention
+
+**Status**: Implemented. `codeExamples` added to `game-mode`, `hud-widget`, `custom-component`, and `custom-action` — every method call in every snippet was verified against the offline API index (api_search + direct SearchEngine/checkScript cross-check of raw signatures) before being written. `admin-tool`, `custom-faction`, `custom-vehicle`, `spawn-system`, `weapon-reskin`, and `modded-behavior` were intentionally left without examples: their obvious "common operation" snippets touch deeper subsystems (loadout assignment, vehicle controller wiring, faction registration, weapon damage tuning) that couldn't be verified to the same confidence level in the available time, and a wrong snippet there is worse than no snippet. `PatternLibrary.getExamplesBlock()` renders all patterns' examples into a "Verified Example Snippets" section injected into the create-mod prompt.
 
 ---
 
@@ -441,7 +443,7 @@ After implementing any upgrade, complete **all** of the following before marking
 | 14 | Auto-Fetch Parent Methods | M | Composability | L1 |
 | ~~15~~ | ~~Prefab Introspection + Ancestry~~ | M | Modder Workflow | L1+L2 merged | DONE |
 | 16 | Compilation Error + Log Capture | M | Modder Workflow | L1+L2 merged |
-| 17 | Example Code Snippets in Patterns | M | Hallucination Prevention | L1 |
+| ~~17~~ | ~~Example Code Snippets in Patterns~~ ✅ | M | Hallucination Prevention | L1 |
 | ~~18~~ | ~~Common Pitfalls Context Injection~~ ✅ | M | Hallucination Prevention | L1 |
 | 19 | Validation-Driven Fix Suggestions | M | Power Feature | L2 |
 | 20 | Cross-Index "Used By" Backlinks | M | Power Feature | L2 |

@@ -301,13 +301,15 @@ After implementing any upgrade, complete **all** of the following before marking
 
 ---
 
-### 19. Validation-Driven Fix Suggestions
+### 19. Validation-Driven Fix Suggestions ✅ Done
 
-**What**: Extend `mod_validate` to return machine-actionable fix objects alongside each `ValidationIssue` — e.g., `{ fix: "move", from: "Scripts/MySrc.c", to: "Scripts/Game/MySrc.c" }` — so the LLM (or a future `mod_fix` tool) can apply fixes automatically instead of requiring the user to interpret text warnings.
+**What**: `mod` action=`validate` now returns a machine-actionable `fix` object alongside each `ValidationIssue` — e.g., `{ action: "move", from: "BadScript.c", to: "Scripts/Game/BadScript.c" }` — so an agent can apply fixes programmatically instead of parsing text warnings.
 
-**Why**: `mod_validate` (`src/tools/mod-validate.ts`) currently returns human-readable strings like `"Scripts/MySrc.c: Script is outside a valid module folder — it will be silently ignored"`. Claude has to parse these strings, figure out the fix, then call `project_write` or `project_read` to move files. Every validation check in `checkStructure`, `checkScripts`, `checkGproj`, `checkReferences`, and `checkNaming` has an obvious programmatic fix that could be expressed as a structured action.
+**Why**: `mod` validate (`src/tools/mod.ts`) previously returned only human-readable strings like `"Scripts/MySrc.c: Script is outside a valid module folder — it will be silently ignored"`. Claude had to parse these strings, figure out the fix, then call `project_write`/`project_read` to move files. Every validation check with an unambiguous, mechanically-derivable remediation now expresses it as a structured `fix`.
 
-**Where**: `src/tools/mod-validate.ts` (extend `ValidationIssue` interface at line 9), new `src/tools/mod-fix.ts`
+**Implementation notes**: `ValidationIssue.fix?: FixAction` where `FixAction` is a discriminated union: `{action:"move", from, to}` (script outside a valid module folder — defaults to `Scripts/Game/<basename>`), `{action:"create", path, contentHint}` (missing expected directory), `{action:"setField", file, field, value}` (missing `.gproj` `ID` field, derived from the filename), `{action:"addDependency", gproj, dependency}` (missing `Dependencies` block or missing base-game dependency), `{action:"rename", from, to}` (naming-prefix violation — `checkNaming` now emits one issue per off-prefix class instead of an aggregate count, each carrying its own rename). Fix is deliberately left `undefined` where there's no single correct answer: missing/invalid GUID, wrong `.gproj` root node type, missing/multiple `.gproj` files, invalid prefab/config format, missing class declaration, unresolved script parent/reference — fabricating a value there would be worse than no suggestion. The validate response now also includes `structuredContent: { issues }` (in addition to the existing text report, which inline-annotates fixable lines with `[fix: {...}]`) so callers can consume fixes without re-parsing markdown. All check functions (`checkStructure`, `checkGproj`, `checkScripts`, `checkPrefabs`, `checkConfigs`, `checkReferences`, `checkNaming`) are now exported from `src/tools/mod.ts` for direct unit testing. Tests: `tests/tools/mod-validate-fix.test.ts` (15 tests covering every check that can produce a fix, plus explicit "no fix" cases). Building an auto-apply tool that consumes these fixes is a separate future item.
+
+**Where**: `src/tools/mod.ts`
 
 **Effort**: M
 
@@ -445,7 +447,7 @@ After implementing any upgrade, complete **all** of the following before marking
 | 16 | Compilation Error + Log Capture | M | Modder Workflow | L1+L2 merged |
 | ~~17~~ | ~~Example Code Snippets in Patterns~~ ✅ | M | Hallucination Prevention | L1 |
 | ~~18~~ | ~~Common Pitfalls Context Injection~~ ✅ | M | Hallucination Prevention | L1 |
-| 19 | Validation-Driven Fix Suggestions | M | Power Feature | L2 |
+| ~~19~~ | ~~Validation-Driven Fix Suggestions~~ ✅ Done | M | Power Feature | L2 |
 | 20 | Cross-Index "Used By" Backlinks | M | Power Feature | L2 |
 | 21 | MODPLAN as Structured Data | M | Power Feature | L2 |
 | 22 | Incremental Asset Index | M | Developer Experience | L2 |

@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { resolve, join, extname, relative } from "node:path";
+import { resolve, join, extname, relative, basename } from "node:path";
 import { spawn } from "node:child_process";
 import type { Config } from "../config.js";
 import { generateGproj } from "../templates/gproj.js";
@@ -213,9 +213,25 @@ function derivePrefix(name: string): string {
 
 // ─── validate helpers ─────────────────────────────────────────────────────────
 
-interface ValidationIssue {
+/**
+ * A structured, machine-executable fix suggestion for a ValidationIssue.
+ * Only attached when the correct remediation is unambiguous and mechanically
+ * derivable from the violation itself — never fabricated. Callers/agents can
+ * pattern-match on `action` to apply the fix programmatically instead of
+ * parsing the human-readable `message`.
+ */
+export type FixAction =
+  | { action: "move"; from: string; to: string }
+  | { action: "create"; path: string; contentHint: string }
+  | { action: "setField"; file: string; field: string; value: string }
+  | { action: "addDependency"; gproj: string; dependency: string }
+  | { action: "rename"; from: string; to: string };
+
+export interface ValidationIssue {
   level: "error" | "warning" | "info";
   message: string;
+  /** Structured fix suggestion, present only when mechanically derivable. */
+  fix?: FixAction;
 }
 
 type CheckName = "structure" | "gproj" | "scripts" | "prefabs" | "configs" | "references" | "naming";
@@ -246,7 +262,7 @@ function findFiles(dir: string, ext: string): string[] {
   return results;
 }
 
-function checkStructure(projectPath: string): ValidationIssue[] {
+export function checkStructure(projectPath: string): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
   // Check for .gproj file
@@ -254,8 +270,11 @@ function checkStructure(projectPath: string): ValidationIssue[] {
     (f) => extname(f).toLowerCase() === ".gproj"
   );
   if (gprojFiles.length === 0) {
+    // No unambiguous fix: we can't derive a correct ID/GUID/TITLE for a
+    // project file that doesn't exist yet.
     issues.push({ level: "error", message: "No .gproj file found in project root" });
   } else if (gprojFiles.length > 1) {
+    // Ambiguous which file is the "real" one — no fix.
     issues.push({ level: "warning", message: `Multiple .gproj files found: ${gprojFiles.join(", ")}` });
   }
 
@@ -263,14 +282,20 @@ function checkStructure(projectPath: string): ValidationIssue[] {
   const expectedDirs = ["Scripts/Game"];
   for (const dir of expectedDirs) {
     if (!existsSync(resolve(projectPath, dir))) {
-      issues.push({ level: "warning", message: `Missing expected directory: ${dir}` });
+      issues.push({
+        level: "warning",
+        message: `Missing expected directory: ${dir}`,
+        fix: { action: "create", path: dir, contentHint: "empty directory for Game module scripts" },
+      });
     }
   }
 
   return issues;
 }
 
-function checkGproj(projectPath: string): ValidationIssue[] {
+const BASE_GAME_DEPENDENCY = "58D0FB3206B6F859";
+
+export function checkGproj(projectPath: string): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
   const gprojFiles = readdirSync(projectPath).filter(
@@ -285,16 +310,25 @@ function checkGproj(projectPath: string): ValidationIssue[] {
       const node = parse(content);
 
       if (node.type !== "GameProject") {
+        // We don't know what the correct root node type should be — no fix.
         issues.push({ level: "error", message: `${filename}: Root node is "${node.type}", expected "GameProject"` });
       }
 
       const id = getProperty(node, "ID");
       if (!id) {
-        issues.push({ level: "error", message: `${filename}: Missing ID field` });
+        // Derivable: the ID conventionally matches the .gproj filename.
+        const derivedId = filename.slice(0, -extname(filename).length);
+        issues.push({
+          level: "error",
+          message: `${filename}: Missing ID field`,
+          fix: { action: "setField", file: filename, field: "ID", value: derivedId },
+        });
       }
 
       const guid = getProperty(node, "GUID");
       if (!guid) {
+        // No mechanically "correct" GUID exists — any freshly generated one
+        // would work, so there's nothing unambiguous to suggest.
         issues.push({ level: "error", message: `${filename}: Missing GUID field` });
       } else if (typeof guid === "string" && !/^[0-9A-Fa-f]{16}$/.test(guid)) {
         issues.push({ level: "warning", message: `${filename}: GUID "${guid}" is not a valid 16-char hex string` });
@@ -302,9 +336,17 @@ function checkGproj(projectPath: string): ValidationIssue[] {
 
       const deps = node.children.find((c) => c.type === "Dependencies");
       if (!deps) {
-        issues.push({ level: "error", message: `${filename}: Missing Dependencies block — mod won't load` });
-      } else if (!deps.values.includes("58D0FB3206B6F859")) {
-        issues.push({ level: "error", message: `${filename}: Missing base game dependency (58D0FB3206B6F859)` });
+        issues.push({
+          level: "error",
+          message: `${filename}: Missing Dependencies block — mod won't load`,
+          fix: { action: "addDependency", gproj: filename, dependency: BASE_GAME_DEPENDENCY },
+        });
+      } else if (!deps.values.includes(BASE_GAME_DEPENDENCY)) {
+        issues.push({
+          level: "error",
+          message: `${filename}: Missing base game dependency (${BASE_GAME_DEPENDENCY})`,
+          fix: { action: "addDependency", gproj: filename, dependency: BASE_GAME_DEPENDENCY },
+        });
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -315,7 +357,7 @@ function checkGproj(projectPath: string): ValidationIssue[] {
   return issues;
 }
 
-function checkScripts(projectPath: string): ValidationIssue[] {
+export function checkScripts(projectPath: string): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
   // Find all .c files in the project
@@ -326,9 +368,14 @@ function checkScripts(projectPath: string): ValidationIssue[] {
 
     // Check if script is in a valid module folder
     if (!rel.startsWith("Scripts/Game/") && !rel.startsWith("Scripts/GameLib/") && !rel.startsWith("Scripts/WorkbenchGame/")) {
+      // Derivable: default target module is Scripts/Game/ (the primary
+      // gameplay-code module). Only the basename is used — we don't know
+      // whether any subdirectory structure outside Scripts/ was meaningful.
+      const to = `Scripts/Game/${basename(rel)}`;
       issues.push({
         level: "error",
         message: `${rel}: Script is outside a valid module folder (Scripts/Game/, Scripts/GameLib/, Scripts/WorkbenchGame/) — it will be silently ignored`,
+        fix: { action: "move", from: rel, to },
       });
       continue;
     }
@@ -354,7 +401,7 @@ function checkScripts(projectPath: string): ValidationIssue[] {
   return issues;
 }
 
-function checkPrefabs(projectPath: string): ValidationIssue[] {
+export function checkPrefabs(projectPath: string): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
   const allPrefabs = findFiles(projectPath, ".et");
@@ -377,7 +424,7 @@ function checkPrefabs(projectPath: string): ValidationIssue[] {
   return issues;
 }
 
-function checkConfigs(projectPath: string, searchEngine?: SearchEngine): ValidationIssue[] {
+export function checkConfigs(projectPath: string, searchEngine?: SearchEngine): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const allConfigs = findFiles(projectPath, ".conf");
 
@@ -423,7 +470,7 @@ function checkConfigs(projectPath: string, searchEngine?: SearchEngine): Validat
   return issues;
 }
 
-function checkReferences(projectPath: string, searchEngine: SearchEngine): ValidationIssue[] {
+export function checkReferences(projectPath: string, searchEngine: SearchEngine): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
   const allScripts = findFiles(projectPath, ".c");
@@ -453,11 +500,12 @@ function checkReferences(projectPath: string, searchEngine: SearchEngine): Valid
   return issues;
 }
 
-function checkNaming(projectPath: string): ValidationIssue[] {
+export function checkNaming(projectPath: string): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
   const allScripts = findFiles(projectPath, ".c");
-  const prefixes: Map<string, number> = new Map();
+  const prefixCounts: Map<string, number> = new Map();
+  const classInfo: Array<{ rel: string; className: string; prefix: string; rest: string }> = [];
 
   for (const scriptPath of allScripts) {
     try {
@@ -466,10 +514,17 @@ function checkNaming(projectPath: string): ValidationIssue[] {
       if (classMatch) {
         const className = classMatch[1];
         // Extract prefix (part before first underscore)
-        const prefixMatch = className.match(/^([A-Z]+)_/);
+        const prefixMatch = className.match(/^([A-Z]+)_(.+)$/);
         if (prefixMatch) {
           const prefix = prefixMatch[1];
-          prefixes.set(prefix, (prefixes.get(prefix) || 0) + 1);
+          const rest = prefixMatch[2];
+          prefixCounts.set(prefix, (prefixCounts.get(prefix) || 0) + 1);
+          classInfo.push({
+            rel: relative(projectPath, scriptPath).replace(/\\/g, "/"),
+            className,
+            prefix,
+            rest,
+          });
         }
       }
     } catch {
@@ -478,21 +533,24 @@ function checkNaming(projectPath: string): ValidationIssue[] {
   }
 
   // Find the most common prefix
-  if (prefixes.size > 1) {
+  if (prefixCounts.size > 1) {
     let maxPrefix = "";
     let maxCount = 0;
-    for (const [prefix, count] of prefixes) {
+    for (const [prefix, count] of prefixCounts) {
       if (count > maxCount) {
         maxPrefix = prefix;
         maxCount = count;
       }
     }
 
-    for (const [prefix, count] of prefixes) {
-      if (prefix !== maxPrefix) {
+    for (const info of classInfo) {
+      if (info.prefix !== maxPrefix) {
+        // Derivable: rename to the majority prefix, keeping the class's own suffix.
+        const to = `${maxPrefix}_${info.rest}`;
         issues.push({
           level: "info",
-          message: `${count} class(es) use prefix "${prefix}_" instead of the most common prefix "${maxPrefix}_"`,
+          message: `${info.rel}: Class "${info.className}" uses prefix "${info.prefix}_" instead of the most common prefix "${maxPrefix}_"`,
+          fix: { action: "rename", from: info.className, to },
         });
       }
     }
@@ -515,7 +573,8 @@ export function registerMod(
       description:
         "Manage Arma Reforger addons: build with the Workbench CLI, scaffold a new addon, validate an existing addon without building, or pack/publish to the Steam Workshop. action='create' supports dryRun to preview the scaffold without writing. " +
         "action='publish' resolves addonName to a concrete .gproj (or uses an explicit gprojPath) and always passes -gproj, so it never falls back to Workbench's ambient last-open-session addon. Unless dryRun=true, it runs a real -packAddon spawn (packing is not irreversible); it additionally uploads via -publishAddon only when confirmPublish=true. IMPORTANT: a mod's first-ever publish (Project Name, Category, Tags, License, Visibility, Summary, Description) has no CLI equivalent and MUST be done once via Workbench > Publish Project GUI — this action only automates packing and subsequent version updates. " +
-        "If ENFUSION_PROJECT_PATH points to a multi-mod workspace (a directory containing several addon folders), action='validate' accepts modName to scope validation to a specific addon.",
+        "If ENFUSION_PROJECT_PATH points to a multi-mod workspace (a directory containing several addon folders), action='validate' accepts modName to scope validation to a specific addon. " +
+        "action='validate' also returns structuredContent.issues[], where each issue may carry a machine-executable fix object (e.g. {action:'move', from, to}, {action:'addDependency', gproj, dependency}) for issues with an unambiguous, mechanically-derivable remediation — fix is omitted when no single correct answer exists (e.g. a missing GUID).",
       inputSchema: {
         action: z
           .enum(["build", "create", "validate", "publish"])
@@ -1234,6 +1293,10 @@ export function registerMod(
       const errors = allIssues.filter((i) => i.level === "error");
       const warnings = allIssues.filter((i) => i.level === "warning");
       const infos = allIssues.filter((i) => i.level === "info");
+      const fixableCount = allIssues.filter((i) => i.fix).length;
+
+      const formatIssue = (i: ValidationIssue): string =>
+        i.fix ? `- ${i.message} [fix: ${JSON.stringify(i.fix)}]` : `- ${i.message}`;
 
       const lines: string[] = [];
       const dirName = basePath.split(/[\\/]/).pop() || basePath;
@@ -1242,19 +1305,19 @@ export function registerMod(
 
       if (errors.length > 0) {
         lines.push(`### Errors (${errors.length})`);
-        for (const e of errors) lines.push(`- ${e.message}`);
+        for (const e of errors) lines.push(formatIssue(e));
         lines.push("");
       }
 
       if (warnings.length > 0) {
         lines.push(`### Warnings (${warnings.length})`);
-        for (const w of warnings) lines.push(`- ${w.message}`);
+        for (const w of warnings) lines.push(formatIssue(w));
         lines.push("");
       }
 
       if (infos.length > 0) {
         lines.push(`### Info (${infos.length})`);
-        for (const i of infos) lines.push(`- ${i.message}`);
+        for (const i of infos) lines.push(formatIssue(i));
         lines.push("");
       }
 
@@ -1268,7 +1331,16 @@ export function registerMod(
         lines.push("All checks passed!");
       }
 
-      return { content: [{ type: "text", text: lines.join("\n") }] };
+      if (fixableCount > 0) {
+        lines.push(
+          `${fixableCount} issue(s) include a structured, machine-executable fix suggestion (see structuredContent.issues[].fix).`
+        );
+      }
+
+      return {
+        content: [{ type: "text", text: lines.join("\n") }],
+        structuredContent: { issues: allIssues },
+      };
     }
   );
 }

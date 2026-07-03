@@ -16,7 +16,9 @@ interface InheritedContext {
   totalAncestorCount: number;
 }
 
-function formatClassResult(cls: ClassInfo, verbose = true, inherited?: InheritedContext, siblingClassNames?: string[]): string {
+export const MAX_USED_BY_SHOWN = 15;
+
+function formatClassResult(cls: ClassInfo, verbose = true, inherited?: InheritedContext, siblingClassNames?: string[], usedBy?: string[]): string {
   const lines: string[] = [];
   lines.push(`## ${cls.name}`);
   lines.push(`Source: ${cls.source === "enfusion" ? "Enfusion Engine" : "Arma Reforger"} API`);
@@ -190,6 +192,19 @@ function formatClassResult(cls: ClassInfo, verbose = true, inherited?: Inherited
     }
     if (siblingClassNames.length > 15) {
       lines.push(`  ... and ${siblingClassNames.length - 15} more`);
+    }
+  }
+
+  // Reverse-lookup: classes that reference this one (parent, param/return/property type)
+  if (verbose && usedBy && usedBy.length > 0) {
+    lines.push("");
+    lines.push(`### Used By (${usedBy.length})`);
+    const shown = usedBy.slice(0, MAX_USED_BY_SHOWN);
+    for (const name of shown) {
+      lines.push(`- ${name}`);
+    }
+    if (usedBy.length > MAX_USED_BY_SHOWN) {
+      lines.push(`  ... and ${usedBy.length - MAX_USED_BY_SHOWN} more`);
     }
   }
 
@@ -412,7 +427,8 @@ export function registerApiSearch(server: McpServer, searchEngine: SearchEngine)
               siblings = group.classes.filter((name) => name !== cls.name);
             }
           }
-          text = formatClassResult(cls, true, inheritedCtx, siblings);
+          const usedBy = searchEngine.getUsedBy(cls.name);
+          text = formatClassResult(cls, true, inheritedCtx, siblings, usedBy);
         } else {
           text = results.map((cls) => formatClassResult(cls, false)).join("\n\n---\n\n");
         }
@@ -476,7 +492,8 @@ export function registerApiSearch(server: McpServer, searchEngine: SearchEngine)
                   siblings = group.classes.filter((name) => name !== r.classInfo!.name);
                 }
               }
-              parts.push(formatClassResult(r.classInfo, verbose, inheritedCtx, siblings));
+              const usedBy = verbose ? searchEngine.getUsedBy(r.classInfo.name) : undefined;
+              parts.push(formatClassResult(r.classInfo, verbose, inheritedCtx, siblings, usedBy));
             } else if (r.type === "method" && r.methodResult) {
               const mr = r.methodResult;
               const sourceLabel = mr.classSource === "enfusion" ? "Enfusion" : "Arma Reforger";

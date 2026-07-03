@@ -91,7 +91,7 @@ Work without Workbench running — API search, mod scaffolding, code generation,
 
 | Tool | What it does |
 |------|-------------|
-| `api_search` | Search 8,693 Enfusion/Arma Reforger API classes and methods — includes inherited members, enum-like class detection, related sibling classes, and `format: 'tree'` for ASCII inheritance hierarchy visualization |
+| `api_search` | Search 8,693 Enfusion/Arma Reforger API classes and methods — includes inherited members, enum-like class detection, related sibling classes, reverse "used by" backlinks (who references this class as parent/param/return/property type), and `format: 'tree'` for ASCII inheritance hierarchy visualization |
 | `component_search` | Search ScriptComponent descendants — filter by category (character, vehicle, weapon, damage, inventory, ai, ui, etc.) and event handlers |
 | `script_check` | Validate a class + method before writing script that calls it — inheritance-aware (finds methods declared on parent classes and names the declaring class), with fuzzy "did you mean" suggestions for typos and unknown classes |
 | `wiki_search` | Search 250+ tutorials and guides from the Enfusion engine docs and BI Community Wiki |

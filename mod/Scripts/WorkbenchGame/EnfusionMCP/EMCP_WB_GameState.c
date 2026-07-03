@@ -135,7 +135,12 @@ class EMCP_WB_GameState : NetApiHandler
 		resp.mode = "game";
 		resp.worldTime = world.GetWorldTime();
 
-		PlayerManager pm = game.GetPlayerManager();
+		// GetPlayerManager() lives on ChimeraGame, not base Game — cast first.
+		// pm may stay null (handled by the guards in each action below).
+		ChimeraGame chimeraGame = ChimeraGame.Cast(game);
+		PlayerManager pm = null;
+		if (chimeraGame)
+			pm = chimeraGame.GetPlayerManager();
 
 		if (action == "world_info")
 		{

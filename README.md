@@ -122,6 +122,7 @@ Control a running Workbench instance over TCP. Requires the handler scripts inst
 | `wb_launch` | Start Workbench if not running, wait for NET API |
 | `wb_connect` | Test connection to Workbench |
 | `wb_state` | Full state snapshot — mode, world, entity count, selection |
+| `wb_game_state` | Inspect the live game world in PLAY mode (the World Editor API is null there, so every other `wb_*` tool fails) — world time, active entity count, filterable/paginated entity list, and connected players with positions. Read-only; requires play mode |
 | `wb_play` | Switch to game mode (Play in Editor) |
 | `wb_stop` | Return to edit mode |
 | `wb_save` | Save the current world |

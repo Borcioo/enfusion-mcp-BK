@@ -11,7 +11,7 @@ import { validateFilename, validateProjectPath } from "../utils/safe-path.js";
 import type { SearchEngine } from "../index/search-engine.js";
 import { parse, getProperty } from "../formats/enfusion-text.js";
 import { formatDryRun, type DryRunFile } from "../utils/dry-run.js";
-import { resolveAddonDir } from "../utils/game-paths.js";
+import { resolveAddonDir, findGproj } from "../utils/game-paths.js";
 
 // ─── build helpers ────────────────────────────────────────────────────────────
 
@@ -145,6 +145,54 @@ export function buildPublishArgs(input: PublishArgsInput): string[] {
   }
 
   return args;
+}
+
+/**
+ * Resolve the concrete .gproj file that a publish/pack run must target.
+ *
+ * The Workbench CLI's -packAddon/-publishAddon flags (unlike -buildData) take
+ * no addonName positional argument — the ONLY way to explicitly scope them is
+ * -gproj. Without it, they fall back to whatever addon Workbench last had
+ * open in its ambient session state, which may not match addonName. To make
+ * "publish this addon" safe, we always resolve a concrete .gproj path here
+ * and require callers to pass it via -gproj (see buildPublishArgs).
+ *
+ * Resolution order:
+ *  1. Explicit gprojPath — used as-is, no addonName lookup.
+ *  2. addonName resolved to an addon directory under config.projectPath
+ *     (resolveAddonDir), then to a .gproj inside it (findGproj).
+ *
+ * Returns an error string (never throws) when the target cannot be resolved,
+ * so the caller can report a clear error before attempting any spawn.
+ */
+function resolvePublishTarget(
+  config: Config,
+  addonName: string,
+  gprojPath?: string
+): { gproj: string } | { error: string } {
+  if (gprojPath) {
+    return { gproj: gprojPath };
+  }
+
+  const addonDir = resolveAddonDir(config.projectPath, addonName);
+  if (!addonDir) {
+    return {
+      error:
+        `Could not find addon directory for '${addonName}' under ${config.projectPath}. ` +
+        "Provide an explicit gprojPath, or ensure addonName matches the addon's folder name.",
+    };
+  }
+
+  const gproj = findGproj(addonDir);
+  if (!gproj) {
+    return {
+      error:
+        `Found addon directory for '${addonName}' at ${addonDir}, but no .gproj file inside it ` +
+        "(checked the root and one level of subdirectories). Provide an explicit gprojPath.",
+    };
+  }
+
+  return { gproj };
 }
 
 // ─── create helpers ───────────────────────────────────────────────────────────
@@ -466,7 +514,7 @@ export function registerMod(
     {
       description:
         "Manage Arma Reforger addons: build with the Workbench CLI, scaffold a new addon, validate an existing addon without building, or pack/publish to the Steam Workshop. action='create' supports dryRun to preview the scaffold without writing. " +
-        "action='publish' packs the addon via the Workbench CLI and, only when confirmPublish=true, also uploads via -publishAddon. IMPORTANT: a mod's first-ever publish (Project Name, Category, Tags, License, Visibility, Summary, Description) has no CLI equivalent and MUST be done once via Workbench > Publish Project GUI — this action only automates packing and subsequent version updates. " +
+        "action='publish' resolves addonName to a concrete .gproj (or uses an explicit gprojPath) and always passes -gproj, so it never falls back to Workbench's ambient last-open-session addon. Unless dryRun=true, it runs a real -packAddon spawn (packing is not irreversible); it additionally uploads via -publishAddon only when confirmPublish=true. IMPORTANT: a mod's first-ever publish (Project Name, Category, Tags, License, Visibility, Summary, Description) has no CLI equivalent and MUST be done once via Workbench > Publish Project GUI — this action only automates packing and subsequent version updates. " +
         "If ENFUSION_PROJECT_PATH points to a multi-mod workspace (a directory containing several addon folders), action='validate' accepts modName to scope validation to a specific addon.",
       inputSchema: {
         action: z
@@ -478,7 +526,10 @@ export function registerMod(
           .string()
           .min(1)
           .optional()
-          .describe("(build) Name of the addon to build (must match the .gproj ID)"),
+          .describe(
+            "(build/publish) Name of the addon (must match the .gproj ID). " +
+            "(publish) Resolved to a concrete .gproj under the configured project path (or overridden by gprojPath); required so publish always targets an explicit addon."
+          ),
         platform: z
           .enum(["PC", "PC_WB", "HEADLESS"])
           .default("PC")
@@ -491,7 +542,10 @@ export function registerMod(
         gprojPath: z
           .string()
           .optional()
-          .describe("(build) Path to .gproj file. Auto-detected if omitted."),
+          .describe(
+            "(build) Path to .gproj file. Auto-detected if omitted. " +
+            "(publish) Explicit .gproj path; when omitted, derived from addonName under the configured project path. Always passed as -gproj so publish never relies on Workbench's ambient session state."
+          ),
         filterPath: z
           .string()
           .optional()
@@ -577,7 +631,7 @@ export function registerMod(
           .default(false)
           .describe(
             "(publish) Must be explicitly set to true to actually run -publishAddon and upload to the Steam Workshop (a real, irreversible network action). " +
-            "Without it, 'publish' only builds and (unless dryRun) executes the local -packAddon step, returning the would-be publish command for review."
+            "Without it, 'publish' still runs the real (non-irreversible) -packAddon step unless dryRun=true, but never uploads."
           ),
       },
     },
@@ -716,8 +770,21 @@ export function registerMod(
           };
         }
 
+        // Resolve a concrete .gproj target BEFORE building argv or spawning anything.
+        // -packAddon/-publishAddon have no addonName positional arg — only -gproj can
+        // scope them — so an unresolved target must hard-fail here rather than silently
+        // falling back to whatever addon Workbench's ambient session last had open.
+        const target = resolvePublishTarget(config, addonName, gprojPath);
+        if ("error" in target) {
+          return {
+            content: [{ type: "text", text: `Could not resolve publish target for '${addonName}': ${target.error}` }],
+            isError: true,
+          };
+        }
+        const resolvedGproj = target.gproj;
+
         const args = buildPublishArgs({
-          gprojPath,
+          gprojPath: resolvedGproj,
           packDir,
           version,
           changeNote,
@@ -738,6 +805,7 @@ export function registerMod(
         const lines: string[] = [];
         lines.push(`## Publish: ${addonName}`);
         lines.push("");
+        lines.push(`**Target:** ${resolvedGproj}`);
         lines.push(`**Command:** ${commandStr}`);
         lines.push("");
         lines.push(manualStepsNote);
@@ -748,39 +816,39 @@ export function registerMod(
           return { content: [{ type: "text", text: lines.join("\n") }] };
         }
 
-        if (!confirmPublish) {
-          lines.push("");
-          lines.push(
-            "**Status:** NOT PUBLISHED. Only pass confirmPublish=true when you intend to actually upload to the Steam Workshop " +
-            "(and only after the first-time GUI publish above has been done). Set confirmPublish=false/omitted (as here) to just review the command."
-          );
-          return { content: [{ type: "text", text: lines.join("\n") }] };
-        }
+        // Packing (-packAddon) builds the publishable output and is NOT irreversible —
+        // it runs for real here even without confirmPublish. Only -publishAddon (the
+        // actual Steam Workshop upload, added above by buildPublishArgs) is gated on
+        // confirmPublish=true.
+        lines.push("");
+        lines.push(
+          confirmPublish
+            ? "**Intent:** pack + publish (upload) — confirmPublish=true."
+            : "**Intent:** pack only — no upload. Set confirmPublish=true to also run -publishAddon and upload to the Steam Workshop " +
+              "(only after the first-time GUI publish above has been done)."
+        );
 
         const exePath = findWorkbenchExe(config.workbenchPath);
         if (!exePath) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Workbench not found at: ${config.workbenchPath}\n\n${WORKBENCH_DIAG_EXE} is required for publishing.\n\nInstall Arma Reforger Tools from Steam, or set ENFUSION_WORKBENCH_PATH to the correct path.\n\nNote: You need the Diag version (opt into "Profiling Build" beta in Steam).`,
-              },
-            ],
-            isError: true,
-          };
+          lines.push("");
+          lines.push(
+            `**Status:** ERROR — Workbench not found at: ${config.workbenchPath}\n\n${WORKBENCH_DIAG_EXE} is required for publishing.\n\nInstall Arma Reforger Tools from Steam, or set ENFUSION_WORKBENCH_PATH to the correct path.\n\nNote: You need the Diag version (opt into "Profiling Build" beta in Steam).`
+          );
+          return { content: [{ type: "text", text: lines.join("\n") }], isError: true };
         }
 
         try {
           const startTime = Date.now();
           const result = await runBuild(exePath, args, BUILD_TIMEOUT_MS);
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+          const ranWhat = confirmPublish ? "packed and published" : "packed (not published)";
 
           if (result.timedOut) {
             lines.push("");
             lines.push(`**Status:** TIMEOUT (exceeded ${BUILD_TIMEOUT_MS / 1000}s limit)`);
           } else if (result.exitCode === 0) {
             lines.push("");
-            lines.push("**Status:** SUCCESS");
+            lines.push(`**Status:** SUCCESS — ${ranWhat}.`);
             lines.push(`**Elapsed:** ${elapsed}s`);
           } else {
             lines.push("");

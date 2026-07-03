@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { resolve } from "node:path";
+import { describe, it, expect, beforeEach, afterAll } from "vitest";
+import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { resolve, join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { loadConfig } from "../../src/config.js";
@@ -9,6 +10,7 @@ import { PatternLibrary } from "../../src/patterns/loader.js";
 import { registerMod, buildPublishArgs } from "../../src/tools/mod.js";
 
 const dataDir = resolve(import.meta.dirname, "../../data");
+const TEST_DIR = resolve(import.meta.dirname, "../../tmp-test-mod-publish");
 const searchEngine = new SearchEngine(dataDir);
 
 type Handler = (args: any) => Promise<{ content: { type: string; text: string }[]; isError?: boolean }>;
@@ -27,11 +29,27 @@ function getText(result: { content: { type: string; text: string }[] }): string 
   return result.content.map((c) => c.text).join("\n");
 }
 
+function write(relPath: string, content = ""): void {
+  const fullPath = join(TEST_DIR, relPath);
+  mkdirSync(resolve(fullPath, ".."), { recursive: true });
+  writeFileSync(fullPath, content, "utf-8");
+}
+
+beforeEach(() => {
+  rmSync(TEST_DIR, { recursive: true, force: true });
+});
+
+afterAll(() => {
+  rmSync(TEST_DIR, { recursive: true, force: true });
+});
+
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
     ...loadConfig(),
     dataDir,
     patternsDir: resolve(dataDir, "patterns"),
+    // Multi-mod workspace used to resolve addonName -> .gproj.
+    projectPath: TEST_DIR,
     // Point at a Workbench path that definitely does not contain the exe, so
     // any test that reaches the exe-resolution step gets a deterministic
     // "not found" error instead of possibly finding a real install.
@@ -41,10 +59,10 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
   };
 }
 
-async function getPublishHandler() {
+async function getPublishHandler(overrides: Partial<Config> = {}) {
   const { server, handlers } = makeFakeServer();
   const patterns = new PatternLibrary(resolve(dataDir, "patterns"));
-  registerMod(server, makeConfig(), searchEngine, patterns);
+  registerMod(server, makeConfig(overrides), searchEngine, patterns);
   return handlers.get("mod")!;
 }
 
@@ -141,36 +159,122 @@ describe("mod action=publish (handler-level gating)", () => {
     expect(getText(result)).toContain("addonName");
   });
 
-  it("dryRun=true returns the command preview and does not execute anything (no exe-not-found error)", async () => {
+  // ── targeting resolution ──────────────────────────────────────────────
+
+  it("unresolvable addonName (no such addon folder) returns a clear error BEFORE any spawn attempt", async () => {
+    const mod = await getPublishHandler();
+    const result = await mod({ action: "publish", addonName: "NoSuchMod" });
+    expect(result.isError).toBe(true);
+    const text = getText(result);
+    expect(text).toContain("NoSuchMod");
+    // Must fail during resolution, never reach exe lookup.
+    expect(text).not.toContain("Workbench not found");
+  });
+
+  it("addon folder exists but has no .gproj: clear error BEFORE any spawn attempt", async () => {
+    write("EmptyMod/readme.txt", "no gproj here");
+    const mod = await getPublishHandler();
+    const result = await mod({ action: "publish", addonName: "EmptyMod" });
+    expect(result.isError).toBe(true);
+    const text = getText(result);
+    expect(text).toContain("EmptyMod");
+    expect(text).not.toContain("Workbench not found");
+  });
+
+  it("addonName resolves into a concrete -gproj in the argv (dryRun preview)", async () => {
+    write("MyMod/MyMod.gproj", "GameProject {}");
+    const mod = await getPublishHandler();
+    const result = await mod({ action: "publish", addonName: "MyMod", dryRun: true });
+    expect(result.isError).toBeUndefined();
+    const text = getText(result);
+    const expectedGproj = join(TEST_DIR, "MyMod", "MyMod.gproj");
+    expect(text).toContain("-gproj");
+    expect(text).toContain(expectedGproj);
+  });
+
+  it("explicit gprojPath bypasses addonName folder resolution entirely", async () => {
+    // addonName does not need to exist as a folder when gprojPath is explicit.
+    const mod = await getPublishHandler();
+    const result = await mod({
+      action: "publish",
+      addonName: "AnyName",
+      gprojPath: "C:\\custom\\Explicit.gproj",
+      dryRun: true,
+    });
+    expect(result.isError).toBeUndefined();
+    const text = getText(result);
+    expect(text).toContain("-gproj");
+    expect(text).toContain("C:\\custom\\Explicit.gproj");
+  });
+
+  // ── pack/publish decoupling ───────────────────────────────────────────
+
+  it("confirmPublish omitted + resolvable target + non-dryRun: a real PACK run is attempted (no longer gated as 'NOT PUBLISHED')", async () => {
+    write("MyMod/MyMod.gproj", "GameProject {}");
+    const mod = await getPublishHandler();
+    const result = await mod({ action: "publish", addonName: "MyMod" });
+    // Workbench exe doesn't exist in the test environment, so a real spawn attempt
+    // surfaces as "Workbench not found" — proof that packing was actually attempted
+    // rather than short-circuited behind confirmPublish.
+    expect(result.isError).toBe(true);
+    const text = getText(result);
+    expect(text).toContain("Workbench not found");
+    expect(text).not.toContain("NOT PUBLISHED");
+    const commandLine = text.split("\n").find((l) => l.startsWith("**Command:**"))!;
+    expect(commandLine).toContain("-packAddon");
+    expect(commandLine).not.toContain("-publishAddon");
+  });
+
+  it("confirmPublish=true + resolvable target + non-dryRun: pack AND publish (-publishAddon) are both attempted", async () => {
+    write("MyMod/MyMod.gproj", "GameProject {}");
+    const mod = await getPublishHandler();
+    const result = await mod({ action: "publish", addonName: "MyMod", confirmPublish: true });
+    expect(result.isError).toBe(true);
+    const text = getText(result);
+    expect(text).toContain("Workbench not found");
+    const commandLine = text.split("\n").find((l) => l.startsWith("**Command:**"))!;
+    expect(commandLine).toContain("-packAddon");
+    expect(commandLine).toContain("-publishAddon");
+    const expectedGproj = join(TEST_DIR, "MyMod", "MyMod.gproj");
+    expect(commandLine).toContain(`-gproj ${expectedGproj}`);
+  });
+
+  it("dryRun=true still only previews the command and never touches the exe", async () => {
+    write("MyMod/MyMod.gproj", "GameProject {}");
     const mod = await getPublishHandler();
     const result = await mod({ action: "publish", addonName: "MyMod", dryRun: true });
     expect(result.isError).toBeUndefined();
     const text = getText(result);
     expect(text).toContain("DRY RUN");
-    expect(text).toContain("-wbModule=ResourceManager");
-    expect(text).toContain("-packAddon");
-    // Must not attempt to resolve/execute the real exe.
     expect(text).not.toContain("Workbench not found");
+    const commandLine = text.split("\n").find((l) => l.startsWith("**Command:**"))!;
+    expect(commandLine).toContain("-wbModule=ResourceManager");
+    expect(commandLine).toContain("-packAddon");
+    expect(commandLine).not.toContain("-publishAddon");
   });
 
-  it("confirmPublish omitted (default false): reports NOT PUBLISHED without touching the exe", async () => {
+  it("dryRun=true with confirmPublish=true previews the publish command too, still without executing", async () => {
+    write("MyMod/MyMod.gproj", "GameProject {}");
     const mod = await getPublishHandler();
-    const result = await mod({ action: "publish", addonName: "MyMod" });
+    const result = await mod({ action: "publish", addonName: "MyMod", dryRun: true, confirmPublish: true });
     expect(result.isError).toBeUndefined();
     const text = getText(result);
-    expect(text).toContain("NOT PUBLISHED");
+    expect(text).toContain("DRY RUN");
+    expect(text).toContain("-publishAddon");
     expect(text).not.toContain("Workbench not found");
   });
 
   it("always documents the manual first-time-publish GUI requirement", async () => {
+    write("MyMod/MyMod.gproj", "GameProject {}");
     const mod = await getPublishHandler();
-    const result = await mod({ action: "publish", addonName: "MyMod" });
+    const result = await mod({ action: "publish", addonName: "MyMod", dryRun: true });
     const text = getText(result);
     expect(text).toContain("Publish Project");
     expect(text.toLowerCase()).toContain("manual");
   });
 
   it("confirmPublish=true but Workbench exe not found: clear error, no crash", async () => {
+    write("MyMod/MyMod.gproj", "GameProject {}");
     const mod = await getPublishHandler();
     const result = await mod({ action: "publish", addonName: "MyMod", confirmPublish: true });
     expect(result.isError).toBe(true);

@@ -1,6 +1,6 @@
 import { openSync, readSync, closeSync, readdirSync, existsSync } from "node:fs";
 import { join, extname } from "node:path";
-import { inflateRawSync } from "node:zlib";
+import { inflateSync } from "node:zlib";
 import { parsePakIndex, type PakIndex, type PakDirEntry, type PakFileEntry } from "./reader.js";
 import { logger } from "../utils/logger.js";
 
@@ -15,7 +15,6 @@ export interface VfsEntry {
 
 interface FileRef {
   pakPath: string;
-  dataStart: number;
   entry: PakFileEntry;
 }
 
@@ -152,13 +151,16 @@ export class PakVirtualFS {
       throw new Error(`File not found in pak: ${virtualPath}`);
     }
 
-    const { pakPath, dataStart, entry } = ref;
+    const { pakPath, entry } = ref;
     const readLen = entry.compressed ? entry.compressedLen : entry.decompressedLen;
 
     const fd = openSync(pakPath, "r");
     try {
       const buf = Buffer.alloc(readLen);
-      const position = dataStart + entry.offset;
+      // entry.offset is an absolute byte position within the .pak file, already
+      // baked in by the pak builder at pack time — it is NOT relative to the
+      // DATA chunk payload, so it must be used as-is (do not add dataStart).
+      const position = entry.offset;
       const bytesRead = readSync(fd, buf, 0, readLen, position);
       if (bytesRead < readLen) {
         throw new Error(
@@ -167,7 +169,15 @@ export class PakVirtualFS {
       }
 
       if (entry.compressed) {
-        return inflateRawSync(buf);
+        // Compressed entries are zlib-wrapped deflate streams (2-byte header +
+        // deflate data + Adler-32 trailer), not raw/headerless deflate.
+        try {
+          return inflateSync(buf);
+        } catch (e) {
+          throw new Error(
+            `Failed to decompress pak entry "${virtualPath}" (zlib): ${e instanceof Error ? e.message : String(e)}`
+          );
+        }
       }
       return buf;
     } finally {
@@ -229,7 +239,6 @@ export class PakVirtualFS {
           target.children.set(name, child);
           this.fileIndex.set(norm, {
             pakPath: index.pakPath,
-            dataStart: index.dataStart,
             entry: child,
           });
           count++;

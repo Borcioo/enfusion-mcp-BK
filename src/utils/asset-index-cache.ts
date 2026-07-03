@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
-import { join, extname } from "node:path";
+import { join, extname, relative, sep } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { logger } from "./logger.js";
@@ -13,11 +13,15 @@ export interface AssetEntry {
   guid?: string;
 }
 
-/** Cheap fingerprint of the loose asset tree: latest mtime across matching files + file count. */
-export interface LooseFingerprint {
-  mtimeMs: number;
-  count: number;
-}
+/**
+ * Fingerprint of the loose asset tree: a per-relative-path map of mtimeMs for
+ * every file matching ASSET_EXTENSIONS under the scanned base. Relative paths
+ * (with forward slashes, portable across OSes) are used as keys so that the
+ * fingerprint is stable across machines and so that a rename/move (same
+ * content+mtime, different path) is visible as "old key gone, new key
+ * present" — a scalar max(mtime)+count fingerprint cannot see that.
+ */
+export type LooseFingerprint = Record<string, number>;
 
 /** Fingerprint of a single .pak archive (mtime + size — enough to detect replacement). */
 export interface PakFingerprint {
@@ -26,7 +30,10 @@ export interface PakFingerprint {
   size: number;
 }
 
-const CACHE_VERSION = 1;
+// Bumped to 2: LooseFingerprint changed from a scalar { mtimeMs, count } to a
+// per-path map { [relativePath]: mtimeMs }. Any cache written under the old
+// schema must be rejected and rebuilt rather than misread.
+const CACHE_VERSION = 2;
 
 export interface AssetIndexCachePayload {
   version: number;
@@ -50,19 +57,27 @@ export function getCacheFilePath(basePath: string, gamePath: string): string {
 }
 
 /**
- * Recursively walk the loose asset tree and compute a cheap fingerprint: the
- * newest mtime among asset-relevant files, plus a total count.
+ * Recursively walk the loose asset tree and compute a per-path fingerprint:
+ * relative-path -> mtimeMs for every asset-relevant file.
  *
- * This is per-FILE granularity (not per-directory) so that editing a single
- * file in place — without adding/removing anything — is still detected: its
- * mtime becomes the new "latest" and the fingerprint changes.
+ * This is per-FILE granularity, keyed by path (not folded into a scalar
+ * max+count), so it detects all three staleness modes:
+ *  - in-place edit: the file's key keeps its path but its mtimeMs value changes
+ *  - add: a new key appears
+ *  - remove: an existing key disappears
+ *  - rename/move (e.g. `mv`, which preserves mtime): the old key disappears
+ *    and a new key appears at the same time — a scalar max(mtime)+count
+ *    fingerprint is blind to this because count is unchanged and the moved
+ *    file's mtime, unchanged by the move, doesn't move the tracked max.
+ *
+ * Paths are stored relative to basePath with forward slashes so the
+ * fingerprint is portable/stable across machines and OSes.
  *
  * It only stats matching files (no readFileSync, no entry object construction,
  * no GUID regex parsing), so it is far cheaper than a full buildIndex() pass.
  */
 export function fingerprintLooseTree(basePath: string): LooseFingerprint {
-  let latestMtimeMs = 0;
-  let count = 0;
+  const fingerprint: LooseFingerprint = {};
 
   function walk(dir: string): void {
     let entries;
@@ -79,10 +94,10 @@ export function fingerprintLooseTree(basePath: string): LooseFingerprint {
       } else {
         const ext = extname(entry.name).toLowerCase();
         if (!ASSET_EXTENSIONS.has(ext)) continue;
-        count++;
         try {
           const mtimeMs = statSync(fullPath).mtimeMs;
-          if (mtimeMs > latestMtimeMs) latestMtimeMs = mtimeMs;
+          const relPath = relative(basePath, fullPath).split(sep).join("/");
+          fingerprint[relPath] = mtimeMs;
         } catch {
           // Unreadable file — ignore, treat as unchanged.
         }
@@ -91,7 +106,7 @@ export function fingerprintLooseTree(basePath: string): LooseFingerprint {
   }
 
   walk(basePath);
-  return { mtimeMs: latestMtimeMs, count };
+  return fingerprint;
 }
 
 /**
@@ -136,8 +151,21 @@ export function fingerprintPaks(gamePath: string): PakFingerprint[] {
   return paks;
 }
 
+/**
+ * Deep-equality check for two per-path loose fingerprints: fresh only if both
+ * have the same set of keys AND the same mtimeMs per key. This catches
+ * in-place edits (value differs), adds/removes (key set differs), and
+ * renames/moves (old key gone + new key present, even though nothing else
+ * about the file changed).
+ */
 export function looseFingerprintsMatch(a: LooseFingerprint, b: LooseFingerprint): boolean {
-  return a.mtimeMs === b.mtimeMs && a.count === b.count;
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
 }
 
 export function pakFingerprintsMatch(a: PakFingerprint[], b: PakFingerprint[]): boolean {
@@ -167,8 +195,9 @@ export function loadPersistedIndex(basePath: string, gamePath: string): AssetInd
       data.gamePath !== gamePath ||
       !Array.isArray(data.entries) ||
       !data.looseFingerprint ||
-      typeof data.looseFingerprint.mtimeMs !== "number" ||
-      typeof data.looseFingerprint.count !== "number" ||
+      typeof data.looseFingerprint !== "object" ||
+      Array.isArray(data.looseFingerprint) ||
+      !Object.values(data.looseFingerprint).every((v) => typeof v === "number") ||
       !Array.isArray(data.pakFingerprints)
     ) {
       logger.warn(`Asset index cache schema mismatch at ${filePath}, ignoring`);

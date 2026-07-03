@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, rmSync, utimesSync, readFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
@@ -121,6 +121,99 @@ describe("asset_search persistent index cache", () => {
     // Touch the file's mtime into the future — content-in-place edit.
     const future = new Date(Date.now() + 60_000);
     utimesSync(filePath, future, future);
+
+    await callAssetSearch(config, { query: "Foo" });
+    const afterSecond = __getBuildCountForTest();
+
+    expect(afterSecond).toBe(afterFirst + 1);
+  });
+
+  it("invalidates the persisted cache when a loose file is ADDED", async () => {
+    const { gamePath, basePath } = makeGameDirs();
+    mkdirSync(join(basePath, "Prefabs"), { recursive: true });
+    writeFileSync(join(basePath, "Prefabs", "Foo.et"), "dummy");
+
+    const config = makeConfig(gamePath);
+
+    const before = __getBuildCountForTest();
+    await callAssetSearch(config, { query: "Foo" });
+    const afterFirst = __getBuildCountForTest();
+    expect(afterFirst).toBe(before + 1);
+
+    invalidateAssetCache();
+    PakVirtualFS.invalidate();
+
+    // Add a brand-new asset file — count changes but max mtime alone might not
+    // reliably move if clock resolution is coarse, so this specifically probes
+    // the "new key added" staleness mode.
+    writeFileSync(join(basePath, "Prefabs", "Bar.et"), "dummy");
+
+    await callAssetSearch(config, { query: "Foo" });
+    const afterSecond = __getBuildCountForTest();
+
+    expect(afterSecond).toBe(afterFirst + 1);
+  });
+
+  it("invalidates the persisted cache when a loose file is REMOVED", async () => {
+    const { gamePath, basePath } = makeGameDirs();
+    mkdirSync(join(basePath, "Prefabs"), { recursive: true });
+    writeFileSync(join(basePath, "Prefabs", "Foo.et"), "dummy");
+    const barPath = join(basePath, "Prefabs", "Bar.et");
+    writeFileSync(barPath, "dummy");
+
+    const config = makeConfig(gamePath);
+
+    const before = __getBuildCountForTest();
+    await callAssetSearch(config, { query: "Foo" });
+    const afterFirst = __getBuildCountForTest();
+    expect(afterFirst).toBe(before + 1);
+
+    invalidateAssetCache();
+    PakVirtualFS.invalidate();
+
+    // Remove a file — count changes but max mtime among remaining files is
+    // unaffected, so this specifically probes the "key removed" staleness mode.
+    rmSync(barPath);
+
+    await callAssetSearch(config, { query: "Foo" });
+    const afterSecond = __getBuildCountForTest();
+
+    expect(afterSecond).toBe(afterFirst + 1);
+  });
+
+  it("invalidates the persisted cache when a loose file is RENAMED/MOVED with mtime preserved", async () => {
+    const { gamePath, basePath } = makeGameDirs();
+    mkdirSync(join(basePath, "Prefabs"), { recursive: true });
+    mkdirSync(join(basePath, "Prefabs", "Weapons"), { recursive: true });
+    const oldPath = join(basePath, "Prefabs", "Foo.et");
+    writeFileSync(oldPath, "dummy");
+    // Pin the mtime to a fixed, whole-second timestamp *before* the first
+    // build, so that re-applying the exact same Date to the moved file below
+    // round-trips through the filesystem identically (avoids sub-ms rounding
+    // drift between the original write-time mtime and a later utimesSync
+    // call, which could otherwise make the scalar fingerprint spuriously
+    // differ for the wrong reason).
+    const fixedMtime = new Date(Date.UTC(2020, 0, 1));
+    utimesSync(oldPath, fixedMtime, fixedMtime);
+
+    const config = makeConfig(gamePath);
+
+    const before = __getBuildCountForTest();
+    await callAssetSearch(config, { query: "Foo" });
+    const afterFirst = __getBuildCountForTest();
+    expect(afterFirst).toBe(before + 1);
+
+    invalidateAssetCache();
+    PakVirtualFS.invalidate();
+
+    // Simulate `mv`: same mtime, same total count, but the file now lives at a
+    // different relative path. A scalar max(mtime)+count fingerprint cannot
+    // detect this — the per-path map must.
+    const newPath = join(basePath, "Prefabs", "Weapons", "Foo.et");
+    const content = readFileSync(oldPath);
+    rmSync(oldPath);
+    writeFileSync(newPath, content);
+    utimesSync(newPath, fixedMtime, fixedMtime);
 
     await callAssetSearch(config, { query: "Foo" });
     const afterSecond = __getBuildCountForTest();

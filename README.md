@@ -101,9 +101,9 @@ Work without Workbench running — API search, mod scaffolding, code generation,
 | `game_read` | Read base game files — scripts, prefabs, configs from loose files or `.pak` |
 | `prefab_inspect` | Inspect a prefab's full inheritance chain — merges all components across ancestors, showing which level each value comes from. Solves the problem of `.et` files only showing overrides. |
 | `asset_search` | Search game assets by name across loose files and `.pak` archives |
-| `project_browse` | List files in a mod project directory |
-| `project_read` | Read any project file |
-| `project_write` | Write or update project files (supports `dryRun` to preview without writing) |
+| `project_browse` | List files in a mod project directory. In a multi-mod workspace (`ENFUSION_PROJECT_PATH` pointing at a directory of addons), browsing the root with no `modName` lists the discovered addon folders instead |
+| `project_read` | Read any project file. Accepts `modName` to scope into a specific addon in a multi-mod workspace |
+| `project_write` | Write or update project files (supports `dryRun` to preview without writing). Accepts `modName` to scope into a specific addon in a multi-mod workspace |
 | `project_patch` | Apply diff-style find-and-replace edits to a project file without rewriting the whole thing — mirrors Claude Code's Edit tool semantics (`oldString` must match exactly once unless `replaceAll` is set; all edits are atomic; supports `dryRun` to preview) |
 | `mod_create` | Scaffold a complete addon with directory structure and `.gproj` (supports `dryRun` to preview without writing) |
 | `script_create` | Generate Enforce Script (`.c`) files — 7 types: component, gamemode, action, entity, manager, modded, basic. Auto-fetches overridable parent methods from API index when `parentClass` is specified (supports `dryRun` to preview without writing) |
@@ -111,7 +111,7 @@ Work without Workbench running — API search, mod scaffolding, code generation,
 | `layout_create` | Generate UI layout (`.layout`) files — 5 types: hud, menu, dialog, list, custom (supports `dryRun` to preview without writing) |
 | `config_create` | Generate config files — factions, missions, entity catalogs, editor placeables (supports `dryRun` to preview without writing) |
 | `server_config` | Generate dedicated server config for local testing |
-| `mod_validate` | Validate project structure, scripts, prefabs, configs, and naming |
+| `mod_validate` | Validate project structure, scripts, prefabs, configs, and naming. Accepts `modName` to scope validation to a specific addon in a multi-mod workspace |
 | `mod_build` | Build the addon using the Workbench CLI |
 | `wb_log` | Read Workbench console/script logs from disk and parse `SCRIPT (E)` compile errors with source context — works even when NET API handlers fail to compile, since it doesn't go through the live connection |
 
@@ -171,13 +171,24 @@ All optional. Sensible defaults are used when nothing is set.
 
 | Environment Variable | Description | Default |
 |---------------------|-------------|---------|
-| `ENFUSION_PROJECT_PATH` | Default mod output directory | `~/Documents/My Games/ArmaReforgerWorkbench/addons` |
+| `ENFUSION_PROJECT_PATH` | Default mod output directory. Can also point at a multi-mod workspace directory containing several addon folders — see below | `~/Documents/My Games/ArmaReforgerWorkbench/addons` |
+| `ENFUSION_DEFAULT_MOD` | Addon folder name (under `ENFUSION_PROJECT_PATH`) to use when a tool call omits `modName`. Also set automatically when `wb_launch` opens a `.gproj` | none |
 | `ENFUSION_WORKBENCH_PATH` | Path to Arma Reforger Tools | `C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger Tools` |
 | `ENFUSION_GAME_PATH` | Path to the Arma Reforger game install (used as CWD when launching Workbench so base-game addons resolve correctly) | Auto-detected from sibling of `ENFUSION_WORKBENCH_PATH` |
 | `ENFUSION_WORKBENCH_HOST` | NET API host | `127.0.0.1` |
 | `ENFUSION_WORKBENCH_PORT` | NET API port | `5775` |
 
 Config can also be loaded from `~/.enfusion-mcp/config.json`. Environment variables take priority.
+
+### Multi-mod workspaces
+
+`ENFUSION_PROJECT_PATH` can point at either a single addon (legacy behavior — the directory itself contains the `.gproj`) or a workspace directory containing several addon folders. In workspace mode:
+
+- Pass `modName` to `project` (browse/read/write), `mod` (`action='validate'`), `game_duplicate`, and `animation_graph` to scope the call to a specific addon folder (filesystem path resolved via `resolveAddonDir`).
+- `server_config` also accepts `modName`, but it isn't a directory-scoping parameter there — it's the addon ID string written into the generated `server.json`'s mod list, not a filesystem path lookup.
+- `project browse` at the workspace root with no `modName` and no `path` lists the discovered addon folders instead of doing a plain file listing.
+- If `modName` is omitted, tools fall back to `ENFUSION_DEFAULT_MOD` (or the raw configured `projectPath` if that isn't set either), so single-mod setups keep working unchanged.
+- Addon detection also handles layouts where the `.gproj` lives one level below the addon folder (e.g. `Central-Economy/source/addon.gproj`), not just at the addon root.
 
 ## Requirements
 

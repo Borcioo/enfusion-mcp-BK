@@ -11,6 +11,7 @@ import { validateFilename, validateProjectPath } from "../utils/safe-path.js";
 import type { SearchEngine } from "../index/search-engine.js";
 import { parse, getProperty } from "../formats/enfusion-text.js";
 import { formatDryRun, type DryRunFile } from "../utils/dry-run.js";
+import { resolveAddonDir } from "../utils/game-paths.js";
 
 // ─── build helpers ────────────────────────────────────────────────────────────
 
@@ -396,7 +397,8 @@ export function registerMod(
     "mod",
     {
       description:
-        "Manage Arma Reforger addons: build with the Workbench CLI, scaffold a new addon, or validate an existing addon without building. action='create' supports dryRun to preview the scaffold without writing.",
+        "Manage Arma Reforger addons: build with the Workbench CLI, scaffold a new addon, or validate an existing addon without building. action='create' supports dryRun to preview the scaffold without writing. " +
+        "If ENFUSION_PROJECT_PATH points to a multi-mod workspace (a directory containing several addon folders), action='validate' accepts modName to scope validation to a specific addon.",
       inputSchema: {
         action: z
           .enum(["build", "create", "validate"])
@@ -457,6 +459,15 @@ export function registerMod(
           .array(z.enum(["structure", "gproj", "scripts", "prefabs", "configs", "references", "naming"]))
           .optional()
           .describe("(validate) Specific checks to run. Runs all checks if omitted."),
+        modName: z
+          .string()
+          .optional()
+          .describe(
+            "(validate) Addon folder name under ENFUSION_PROJECT_PATH when it points to a multi-mod workspace " +
+            "(e.g., 'MyMod'). Scopes validation to that addon. If omitted, falls back to the configured default " +
+            "mod (ENFUSION_DEFAULT_MOD), or the configured project path itself. Ignored when 'projectPath' is " +
+            "explicitly provided."
+          ),
 
         // ── create params (continued) ─────────────────────────────────────────
         dryRun: z
@@ -467,7 +478,7 @@ export function registerMod(
           ),
       },
     },
-    async ({ action, addonName, platform, outputPath, gprojPath, filterPath, name, description, prefix, pattern: patternName, projectPath, checks, dryRun }) => {
+    async ({ action, addonName, platform, outputPath, gprojPath, filterPath, name, description, prefix, pattern: patternName, projectPath, checks, modName, dryRun }) => {
 
       // ── build ──────────────────────────────────────────────────────────────
       if (action === "build") {
@@ -820,6 +831,9 @@ export function registerMod(
 
       // ── validate ───────────────────────────────────────────────────────────
       // action === "validate"
+      // Resolve the addon directory to validate.
+      // Precedence: explicit projectPath override > modName (multi-mod workspace) >
+      // configured defaultMod > configured projectPath (original single-mod behavior).
       let basePath: string;
       if (projectPath) {
         // Validate user-supplied path is within the configured project directory
@@ -835,7 +849,30 @@ export function registerMod(
             ],
           };
         }
+      } else if (modName) {
+        const addonDir = resolveAddonDir(config.projectPath, modName);
+        if (!addonDir) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Could not find addon directory. '${modName}' not found under ${config.projectPath}. Provide modName matching the addon folder name.`,
+              },
+            ],
+            isError: true,
+          };
+        }
+        basePath = addonDir;
+      } else if (config.defaultMod) {
+        basePath = resolveAddonDir(config.projectPath, config.defaultMod) ?? config.projectPath;
       } else {
+        // Deliberate exception: when neither modName nor defaultMod is set, this falls
+        // through to the raw config.projectPath rather than auto-detecting the first
+        // .gproj addon (which is what game-duplicate.ts / wb-entity-duplicate.ts do via
+        // resolveAddonDir(projectPath) with no modName). That auto-detect scans child
+        // directories for a .gproj, which would break the legacy "single addon lives
+        // directly at projectPath, no multi-mod subfolders" layout. Keeping the plain
+        // fallback here preserves backward compatibility for that layout.
         basePath = config.projectPath;
       }
 

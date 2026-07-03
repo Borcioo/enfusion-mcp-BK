@@ -59,8 +59,8 @@ export function resolveAddonDir(projectPath: string, modName?: string): string |
   return null;
 }
 
-/** Find the first .gproj file in a directory. */
-export function findGproj(dir: string): string | null {
+/** Find a .gproj file directly inside a directory (no recursion). */
+export function findGprojDirect(dir: string): string | null {
   try {
     const entries = readdirSync(dir, { withFileTypes: true });
     for (const e of entries) {
@@ -72,4 +72,60 @@ export function findGproj(dir: string): string | null {
     // ignore
   }
   return null;
+}
+
+/**
+ * Find the first .gproj file for an addon directory.
+ * Checks the directory root first, then falls back to one level of
+ * subdirectories — some addons (e.g. Central-Economy) keep the .gproj in a
+ * nested `source/` folder rather than at the addon root.
+ */
+export function findGproj(dir: string): string | null {
+  const direct = findGprojDirect(dir);
+  if (direct) return direct;
+
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true });
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const nested = findGprojDirect(join(dir, e.name));
+      if (nested) return nested;
+    }
+  } catch {
+    // ignore
+  }
+
+  return null;
+}
+
+/** An addon folder discovered under a multi-mod workspace directory. */
+export interface AddonEntry {
+  /** Folder name (relative to the workspace projectPath). */
+  name: string;
+  /** Whether a .gproj file was found for this addon (root or one level deep). */
+  hasGproj: boolean;
+  /** Absolute path to the .gproj file, if found. */
+  gprojPath: string | null;
+}
+
+/**
+ * List addon folders under a multi-mod workspace directory.
+ * Returns every top-level directory, flagging which ones contain a .gproj
+ * (directly or one level deep, e.g. `<addon>/source/*.gproj`) so callers can
+ * distinguish real addons from other folders.
+ */
+export function listAddons(projectPath: string): AddonEntry[] {
+  const results: AddonEntry[] = [];
+  try {
+    const entries = readdirSync(projectPath, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+      const dir = join(projectPath, entry.name);
+      const gprojPath = findGproj(dir);
+      results.push({ name: entry.name, hasGproj: gprojPath !== null, gprojPath });
+    }
+  } catch {
+    // ignore
+  }
+  return results;
 }

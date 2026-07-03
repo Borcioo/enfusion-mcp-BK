@@ -7,13 +7,15 @@ import type { Config } from "../config.js";
 import { validateProjectPath } from "../utils/safe-path.js";
 import { listDirectory, formatSize } from "../utils/dir-listing.js";
 import { formatDryRun } from "../utils/dry-run.js";
+import { resolveAddonDir, findGprojDirect, listAddons } from "../utils/game-paths.js";
 
 export function registerProject(server: McpServer, config: Config): void {
   server.registerTool(
     "project",
     {
       description:
-        "Browse, read, or write files in an Arma Reforger Workbench project directory. Use action='browse' to list files, action='read' to read a file, action='write' to write a file. action='write' supports dryRun to preview without writing.",
+        "Browse, read, or write files in an Arma Reforger Workbench project directory. Use action='browse' to list files, action='read' to read a file, action='write' to write a file. action='write' supports dryRun to preview without writing. " +
+        "If ENFUSION_PROJECT_PATH points to a multi-mod workspace (a directory containing several addon folders), pass modName to scope any action to a specific addon; action='browse' at the workspace root with no modName lists the available addon folders.",
       inputSchema: {
         action: z
           .enum(["browse", "read", "write"])
@@ -46,6 +48,17 @@ export function registerProject(server: McpServer, config: Config): void {
           .describe(
             "Absolute path to the project directory. Uses configured default if omitted."
           ),
+        modName: z
+          .string()
+          .optional()
+          .describe(
+            "Addon folder name under ENFUSION_PROJECT_PATH when it points to a multi-mod workspace " +
+            "(e.g., 'MyMod'). Scopes browse/read/write into that addon. If omitted, falls back to the " +
+            "configured default mod (ENFUSION_DEFAULT_MOD), or the configured project path itself. " +
+            "Ignored when 'projectPath' is explicitly provided. " +
+            "When action='browse' is called at the workspace root with no modName and no path, " +
+            "the available addon folders are listed instead of a plain file listing."
+          ),
         dryRun: z
           .boolean()
           .default(false)
@@ -54,8 +67,39 @@ export function registerProject(server: McpServer, config: Config): void {
           ),
       },
     },
-    async ({ action, path: inputPath, pattern, content, createDirectories, projectPath, dryRun }) => {
-      const basePath = projectPath || config.projectPath;
+    async ({ action, path: inputPath, pattern, content, createDirectories, projectPath, modName, dryRun }) => {
+      // Resolve the base path this call operates on.
+      // Precedence: explicit projectPath override > modName (multi-mod workspace) >
+      // configured defaultMod > configured projectPath (original single-mod behavior).
+      let basePath: string;
+      if (projectPath) {
+        basePath = projectPath;
+      } else if (modName) {
+        const addonDir = resolveAddonDir(config.projectPath, modName);
+        if (!addonDir) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Could not find addon directory. '${modName}' not found under ${config.projectPath}. Provide modName matching the addon folder name.`,
+              },
+            ],
+            isError: true,
+          };
+        }
+        basePath = addonDir;
+      } else if (config.defaultMod) {
+        basePath = resolveAddonDir(config.projectPath, config.defaultMod) ?? config.projectPath;
+      } else {
+        // Deliberate exception: when neither modName nor defaultMod is set, this falls
+        // through to the raw config.projectPath rather than auto-detecting the first
+        // .gproj addon (which is what game-duplicate.ts / wb-entity-duplicate.ts do via
+        // resolveAddonDir(projectPath) with no modName). That auto-detect scans child
+        // directories for a .gproj, which would break the legacy "single addon lives
+        // directly at projectPath, no multi-mod subfolders" layout. Keeping the plain
+        // fallback here preserves backward compatibility for that layout.
+        basePath = config.projectPath;
+      }
 
       if (!basePath) {
         return {
@@ -72,6 +116,38 @@ export function registerProject(server: McpServer, config: Config): void {
       if (action === "browse") {
         try {
           const subPath = inputPath ?? "";
+          const isRootBrowse = !subPath || subPath === ".";
+
+          // Multi-mod workspace discovery: browsing the root with no modName/projectPath
+          // override lists the addon folders found under the workspace instead of a plain
+          // file listing — but only when basePath is still the raw, unscoped workspace root
+          // (i.e. defaultMod/modName did NOT already resolve basePath to a specific addon).
+          // We gate on `basePath === config.projectPath` rather than re-deriving "is this an
+          // addon" via findGprojDirect on the already-resolved basePath: for nested-source
+          // layouts (e.g. Central-Economy/source/addon.gproj resolved via defaultMod),
+          // findGprojDirect(basePath) wrongly returns null even though basePath IS a real,
+          // already-resolved addon — which used to cause a bogus fall-through to the addon list.
+          // The findGprojDirect(basePath) check is still needed for the legacy case where a
+          // single addon's .gproj sits directly at the (unscoped) workspace root with no
+          // defaultMod configured — that must keep browsing the root itself, not list addons.
+          const isUnscopedWorkspaceRoot = basePath === config.projectPath;
+          if (isRootBrowse && !modName && !projectPath && isUnscopedWorkspaceRoot && !findGprojDirect(basePath)) {
+            const addons = listAddons(config.projectPath);
+            if (addons.length > 0) {
+              const lines: string[] = [];
+              lines.push(`Workspace: ${config.projectPath}`);
+              lines.push(`Addons found: ${addons.length}`);
+              lines.push("");
+              for (const addon of addons) {
+                const tag = addon.hasGproj ? "[addon]" : "[no .gproj]";
+                lines.push(`  ${addon.name}/  ${tag}`);
+              }
+              lines.push("");
+              lines.push("Pass modName to browse/read/write within a specific addon.");
+              return { content: [{ type: "text", text: lines.join("\n") }] };
+            }
+          }
+
           const targetPath = subPath
             ? validateProjectPath(basePath, subPath)
             : basePath;

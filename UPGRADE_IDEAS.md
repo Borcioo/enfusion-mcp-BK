@@ -347,7 +347,7 @@ After implementing any upgrade, complete **all** of the following before marking
 
 ---
 
-### 22. Incremental Asset Index
+### ~~22. Incremental Asset Index~~ ✅ Done
 
 **What**: Replace the session-scoped module-level cache for asset search (`let cachedIndex: AssetEntry[] | null = null` at `src/tools/asset-search.ts:29`) with a persistent on-disk index that uses file modification timestamps to incrementally update only changed files.
 
@@ -358,6 +358,8 @@ After implementing any upgrade, complete **all** of the following before marking
 **Effort**: M
 
 **Category**: Developer Experience
+
+**Status: complete** (branch `feat/incremental-asset-index`). New `src/utils/asset-index-cache.ts`: on-disk JSON cache under `~/.enfusion-mcp/cache/asset-index-<hash of basePath+gamePath>.json` (overridable via `ENFUSION_MCP_CACHE_DIR` for test isolation), keyed by a SHA-1 hash of `(basePath, gamePath)`. Invalidation is per-file mtime for loose assets (`fingerprintLooseTree` stats every asset-relevant file and tracks the newest mtime + count — cheap since it skips content reads/GUID parsing) and per-`.pak` mtime+size for archives (`fingerprintPaks`). On load, if either fingerprint set differs from what's on disk, the index is fully rebuilt and the cache overwritten; a corrupt or schema-mismatched cache file is logged and ignored (never served). The `refresh:true` tool param bypasses the persisted cache and always forces a rebuild. The in-memory module cache (`cachedIndex`/`cachedBasePath`) is kept as the fast same-session layer on top. 7 new tests in `tests/tools/asset-search-cache.test.ts` cover: persist+reuse across a simulated new session without rebuilding, invalidation on loose-file mtime change, invalidation on `.pak` mtime change, graceful rebuild on corrupt JSON, graceful rebuild on schema mismatch, `refresh:true` forcing rebuild, and identical results cold vs. warm.
 
 ---
 

@@ -6,17 +6,16 @@ import type { Config } from "../config.js";
 import { logger } from "../utils/logger.js";
 import { PakVirtualFS } from "../pak/vfs.js";
 import { resolveGameDataPath } from "../utils/game-paths.js";
-
-interface AssetEntry {
-  /** Relative path from game data root (e.g., "Prefabs/Weapons/Rifles/AK47/AK47.et") */
-  path: string;
-  /** File extension without dot */
-  ext: string;
-  /** Resource GUID from entity catalog, if available (e.g., "657590C1EC9E27D3") */
-  guid?: string;
-}
-
-const ASSET_EXTENSIONS = new Set([".et", ".xob", ".edds", ".c", ".conf", ".emat", ".layout", ".sounds"]);
+import {
+  ASSET_EXTENSIONS,
+  type AssetEntry,
+  fingerprintLooseTree,
+  fingerprintPaks,
+  looseFingerprintsMatch,
+  pakFingerprintsMatch,
+  loadPersistedIndex,
+  savePersistedIndex,
+} from "../utils/asset-index-cache.js";
 
 const TYPE_FILTER: Record<string, string[]> = {
   prefab: [".et"],
@@ -28,10 +27,16 @@ const TYPE_FILTER: Record<string, string[]> = {
   layout: [".layout"],
 };
 
-/** Cached file index — built once per session */
+/** In-memory cache — fast repeat calls within a session. */
 let cachedIndex: AssetEntry[] | null = null;
 let cachedBasePath: string | null = null;
 let cachedGuidDiag = "";
+
+/** Test-only counter: how many times buildIndex() actually ran a full walk. */
+let buildCount = 0;
+export function __getBuildCountForTest(): number {
+  return buildCount;
+}
 
 /**
  * Parse entity catalog .conf files to build a map of normalized prefab path → GUID.
@@ -83,6 +88,7 @@ function buildGuidIndex(basePath: string): { guidMap: Map<string, string>; diag:
 }
 
 function buildIndex(basePath: string, gamePath: string): AssetEntry[] {
+  buildCount++;
   const start = Date.now();
   const entries: AssetEntry[] = [];
   const seen = new Set<string>();
@@ -176,12 +182,51 @@ export function invalidateAssetCache(): void {
   cachedGuidDiag = "";
 }
 
-function getIndex(basePath: string, gamePath: string): AssetEntry[] {
-  if (cachedIndex && cachedBasePath === basePath) {
+/**
+ * Get the asset index, preferring (in order):
+ *  1. the in-memory cache (fast repeat calls within a session)
+ *  2. the on-disk persistent cache, if its mtime fingerprints still match
+ *     the current game install (fast first search in a NEW session)
+ *  3. a full rebuild (walks the game dir + all .pak files)
+ *
+ * `forceRefresh` (the `refresh:true` tool param) bypasses both caches and
+ * always rebuilds, then overwrites the persisted cache with fresh data.
+ */
+function getIndex(basePath: string, gamePath: string, forceRefresh = false): AssetEntry[] {
+  if (!forceRefresh && cachedIndex && cachedBasePath === basePath) {
     return cachedIndex;
   }
+
+  const looseFp = fingerprintLooseTree(basePath);
+  const pakFp = fingerprintPaks(gamePath);
+
+  if (!forceRefresh) {
+    const persisted = loadPersistedIndex(basePath, gamePath);
+    if (
+      persisted &&
+      looseFingerprintsMatch(persisted.looseFingerprint, looseFp) &&
+      pakFingerprintsMatch(persisted.pakFingerprints, pakFp)
+    ) {
+      cachedIndex = persisted.entries;
+      cachedBasePath = basePath;
+      cachedGuidDiag = persisted.guidDiag;
+      logger.info(
+        `Asset index loaded from persistent cache: ${persisted.entries.length} files (no rebuild)`
+      );
+      return cachedIndex;
+    }
+  }
+
   cachedIndex = buildIndex(basePath, gamePath);
   cachedBasePath = basePath;
+  savePersistedIndex({
+    basePath,
+    gamePath,
+    looseFingerprint: looseFp,
+    pakFingerprints: pakFp,
+    entries: cachedIndex,
+    guidDiag: cachedGuidDiag,
+  });
   return cachedIndex;
 }
 
@@ -215,9 +260,6 @@ export function registerAssetSearch(server: McpServer, config: Config): void {
       },
     },
     async ({ query, type, limit, refresh }) => {
-      if (refresh) {
-        invalidateAssetCache();
-      }
       const basePath = resolveGameDataPath(config.gamePath);
       if (!basePath) {
         return {
@@ -232,7 +274,7 @@ export function registerAssetSearch(server: McpServer, config: Config): void {
       }
 
       try {
-        const index = getIndex(basePath, config.gamePath);
+        const index = getIndex(basePath, config.gamePath, refresh);
         const q = query.toLowerCase();
         const allowedExts = type !== "any" ? TYPE_FILTER[type] : null;
 

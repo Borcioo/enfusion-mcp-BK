@@ -8,14 +8,17 @@ import { validateProjectPath } from "../utils/safe-path.js";
 import { listDirectory, formatSize } from "../utils/dir-listing.js";
 import { formatDryRun } from "../utils/dry-run.js";
 import { resolveAddonDir, findGprojDirect, listAddons } from "../utils/game-paths.js";
+import { validateScriptReferences, formatValidationWarnings } from "../utils/script-validate.js";
+import type { SearchEngine } from "../index/search-engine.js";
 
-export function registerProject(server: McpServer, config: Config): void {
+export function registerProject(server: McpServer, config: Config, searchEngine?: SearchEngine): void {
   server.registerTool(
     "project",
     {
       description:
         "Browse, read, or write files in an Arma Reforger Workbench project directory. Use action='browse' to list files, action='read' to read a file, action='write' to write a file. action='write' supports dryRun to preview without writing. " +
-        "If ENFUSION_PROJECT_PATH points to a multi-mod workspace (a directory containing several addon folders), pass modName to scope any action to a specific addon; action='browse' at the workspace root with no modName lists the available addon folders.",
+        "If ENFUSION_PROJECT_PATH points to a multi-mod workspace (a directory containing several addon folders), pass modName to scope any action to a specific addon; action='browse' at the workspace root with no modName lists the available addon folders. " +
+        "When writing a '.c' script, a lightweight cross-reference check runs against the offline API index and appends non-blocking WARNINGS for method calls on known classes that don't resolve (with 'did you mean' suggestions) — the write always succeeds regardless of warnings; classes declared locally in the same file are excluded to avoid false positives.",
       inputSchema: {
         action: z
           .enum(["browse", "read", "write"])
@@ -260,11 +263,17 @@ export function registerProject(server: McpServer, config: Config): void {
           writeFileSync(fullPath, content, "utf-8");
           const sizeBytes = Buffer.byteLength(content, "utf-8");
 
+          let text = `File written: ${inputPath} (${sizeBytes} bytes)`;
+          if (searchEngine && inputPath.toLowerCase().endsWith(".c")) {
+            const warnings = validateScriptReferences(searchEngine, content);
+            text += formatValidationWarnings(warnings);
+          }
+
           return {
             content: [
               {
                 type: "text",
-                text: `File written: ${inputPath} (${sizeBytes} bytes)`,
+                text,
               },
             ],
           };

@@ -4,6 +4,8 @@ import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import type { Config } from "../config.js";
 import { validateProjectPath } from "../utils/safe-path.js";
 import { formatDryRun } from "../utils/dry-run.js";
+import { validateScriptReferences, formatValidationWarnings } from "../utils/script-validate.js";
+import type { SearchEngine } from "../index/search-engine.js";
 
 const editSchema = z.object({
   oldString: z
@@ -18,14 +20,15 @@ const editSchema = z.object({
     ),
 });
 
-export function registerProjectPatch(server: McpServer, config: Config): void {
+export function registerProjectPatch(server: McpServer, config: Config, searchEngine?: SearchEngine): void {
   server.registerTool(
     "project_patch",
     {
       description:
         "Apply one or more find-and-replace edits to a file in an Arma Reforger Workbench project, without rewriting the whole file. " +
         "Mirrors Claude Code's Edit tool semantics: each edit's oldString must occur exactly once in the file (unless replaceAll is set), " +
-        "or the edit is rejected. All edits are applied atomically — if any edit fails, nothing is written. Supports dryRun to preview.",
+        "or the edit is rejected. All edits are applied atomically — if any edit fails, nothing is written. Supports dryRun to preview. " +
+        "When patching a '.c' script, a lightweight cross-reference check runs against the offline API index and appends non-blocking WARNINGS for method calls on known classes that don't resolve (with 'did you mean' suggestions) — the patch always applies regardless of warnings; classes declared locally in the same file are excluded to avoid false positives.",
       inputSchema: {
         path: z
           .string()
@@ -146,11 +149,17 @@ export function registerProjectPatch(server: McpServer, config: Config): void {
         writeFileSync(fullPath, content, "utf-8");
         const sizeBytes = Buffer.byteLength(content, "utf-8");
 
+        let text = `File patched: ${inputPath} (${edits.length} edit${edits.length === 1 ? "" : "s"} applied, ${sizeBytes} bytes)`;
+        if (searchEngine && inputPath.toLowerCase().endsWith(".c")) {
+          const warnings = validateScriptReferences(searchEngine, content);
+          text += formatValidationWarnings(warnings);
+        }
+
         return {
           content: [
             {
               type: "text",
-              text: `File patched: ${inputPath} (${edits.length} edit${edits.length === 1 ? "" : "s"} applied, ${sizeBytes} bytes)`,
+              text,
             },
           ],
         };

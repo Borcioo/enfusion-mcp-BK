@@ -353,7 +353,7 @@ After implementing any upgrade, complete **all** of the following before marking
 
 ---
 
-### 23. Multi-Mod Workspace Support
+### ~~23. Multi-Mod Workspace Support~~ ✅ Done
 
 **What**: Currently `ENFUSION_PROJECT_PATH` points to a single addon. Support a workspace model where the path points to the `addons/` directory and tools accept a `modName` parameter to select which addon to operate on. `project_browse` would list all addons in the workspace, and creation tools would scope to the selected one.
 
@@ -364,6 +364,8 @@ After implementing any upgrade, complete **all** of the following before marking
 **Effort**: M
 
 **Category**: Modder Workflow
+
+**Resolution**: `resolveAddonDir(projectPath, modName)` (`src/utils/game-paths.ts`), already used by `game_duplicate`, `server_config`, and `animation_graph`, is now also used by `project` (browse/read/write) and `mod` (`action='validate'`). Both accept an optional `modName` that scopes the call to a specific addon under `ENFUSION_PROJECT_PATH`; omitting it falls back to `ENFUSION_DEFAULT_MOD`, then to the raw configured `projectPath` — reproducing the exact pre-existing single-mod behavior when neither is set. `project` with `action='browse'` at the workspace root (no `modName`, no `path`/`path='.'`) now lists the discovered addon folders instead of doing a plain file listing, using the new `listAddons()` helper. `findGproj()` was extended to also detect a `.gproj` one level below the addon folder (e.g. `Central-Economy/source/addon.gproj`), so addon detection and workspace listing work for that layout too. Covered by `tests/utils/game-paths.test.ts`, `tests/tools/project-modname.test.ts`, and `tests/tools/mod-modname.test.ts` (including explicit backward-compat regression tests for the no-`modName` and no-`modName`-plus-`defaultMod` cases).
 
 ---
 
@@ -443,7 +445,7 @@ After implementing any upgrade, complete **all** of the following before marking
 | 20 | Cross-Index "Used By" Backlinks | M | Power Feature | L2 |
 | 21 | MODPLAN as Structured Data | M | Power Feature | L2 |
 | 22 | Incremental Asset Index | M | Developer Experience | L2 |
-| 23 | Multi-Mod Workspace Support | M | Modder Workflow | L1 |
+| ~~23~~ | ~~Multi-Mod Workspace Support~~ ✅ | M | Modder Workflow | L1 |
 | 24 | ~~Diff-Based Script Patching~~ ✅ Done | M-L | Power Feature | L1+L2 merged |
 | 25 | Cross-Reference Validation on Write | L | Hallucination Prevention | L1 |
 | 26 | Component Compatibility Matrix | L | Hallucination Prevention | L1 |

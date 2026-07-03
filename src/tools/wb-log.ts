@@ -1,78 +1,15 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import type { Config } from "../config.js";
-import { findLatestLogDir, readLogTail, parseCompileErrors, type CompileError } from "../workbench/logs.js";
-import { logger } from "../utils/logger.js";
-
-/** Candidate parent directories that hold logs_<timestamp> subfolders. */
-function candidateLogBases(config: Config): string[] {
-  const candidates: string[] = [];
-  if (config.workbenchProfileDir) candidates.push(config.workbenchProfileDir);
-  candidates.push(
-    join(homedir(), "Documents", "My Games", "ArmaReforgerWorkbench", "logs"),
-    join(homedir(), "OneDrive", "Dokumenty", "My Games", "ArmaReforgerWorkbench", "logs"),
-    join(homedir(), "OneDrive", "Documents", "My Games", "ArmaReforgerWorkbench", "logs")
-  );
-  return candidates;
-}
-
-/** Resolve the first existing candidate logs base directory. */
-function resolveLogsBase(config: Config): string | null {
-  for (const candidate of candidateLogBases(config)) {
-    if (existsSync(candidate)) {
-      logger.debug(`wb_log: using logs base dir ${candidate}`);
-      return candidate;
-    }
-  }
-  return null;
-}
-
-/** Locate a script source file on disk to pull context lines around a compile error. */
-function findSourceFile(config: Config, relFile: string): string | null {
-  const roots: string[] = [];
-  if (config.defaultMod) roots.push(join(config.projectPath, config.defaultMod));
-  roots.push(config.projectPath);
-
-  for (const root of roots) {
-    const candidate = join(root, relFile);
-    if (existsSync(candidate)) return candidate;
-  }
-
-  // Fall back to scanning immediate subdirectories of projectPath (addon folders)
-  try {
-    for (const entry of readdirSync(config.projectPath, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const candidate = join(config.projectPath, entry.name, relFile);
-      if (existsSync(candidate)) return candidate;
-    }
-  } catch {
-    // projectPath may not exist / be readable — ignore
-  }
-
-  return null;
-}
-
-/** Read up to `radius` lines of context before/after the 1-indexed error line. */
-function readContext(filePath: string, line: number, radius = 5): string | null {
-  try {
-    const lines = readFileSync(filePath, "utf-8").split("\n");
-    const start = Math.max(0, line - 1 - radius);
-    const end = Math.min(lines.length, line + radius);
-    return lines
-      .slice(start, end)
-      .map((l, i) => {
-        const lineNo = start + i + 1;
-        const marker = lineNo === line ? ">>" : "  ";
-        return `${marker} ${lineNo}: ${l}`;
-      })
-      .join("\n");
-  } catch {
-    return null;
-  }
-}
+import {
+  findLatestLogDir,
+  readLogTail,
+  parseCompileErrors,
+  candidateLogBases,
+  resolveLogsBase,
+  formatCompileErrors,
+  type CompileError,
+} from "../workbench/logs.js";
 
 export function registerWbLog(server: McpServer, config: Config): void {
   server.registerTool(
@@ -131,25 +68,15 @@ export function registerWbLog(server: McpServer, config: Config): void {
       }
 
       if (errorsOnly) {
-        const { text } = readLogTail(logDir, { fileName });
-        const errors: CompileError[] = parseCompileErrors(text);
+        const { text: rawText } = readLogTail(logDir, { fileName });
+        const errors: CompileError[] = parseCompileErrors(rawText);
 
         if (errors.length === 0) {
           return { content: [{ type: "text" as const, text: `No compile errors found in ${logDir}/${fileName}.` }] };
         }
 
-        const parts: string[] = [`**Compile Errors** (${logDir}/${fileName})\n`];
-        for (const err of errors) {
-          parts.push(`- ${err.file}:${err.line}: ${err.message}`);
-          const sourcePath = findSourceFile(config, err.file);
-          if (sourcePath) {
-            const context = readContext(sourcePath, err.line);
-            if (context) parts.push("```\n" + context + "\n```");
-          } else {
-            parts.push(`  (source file not found for context: ${err.file})`);
-          }
-        }
-        return { content: [{ type: "text" as const, text: parts.join("\n") }] };
+        const formatted = formatCompileErrors(config, `${logDir}/${fileName}`, errors);
+        return { content: [{ type: "text" as const, text: formatted }] };
       }
 
       const { text } = readLogTail(logDir, { lines, filter: filterRe, fileName });

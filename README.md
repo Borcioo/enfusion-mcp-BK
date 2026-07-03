@@ -127,7 +127,7 @@ Control a running Workbench instance over TCP. Requires the handler scripts inst
 | `wb_save` | Save the current world |
 | `wb_undo_redo` | Undo or redo the last action |
 | `wb_open_resource` | Open a resource in its editor |
-| `wb_reload` | Reload scripts or plugins without restarting |
+| `wb_reload` | Reload scripts or plugins without restarting — automatically waits for the console log to grow and surfaces any new compile errors (file:line, message, ±5 lines of source context) in the response |
 | `wb_execute_action` | Run any Workbench menu action by path |
 | `wb_entity_create` | Create entity from prefab at a position |
 | `wb_entity_delete` | Delete entity by name |

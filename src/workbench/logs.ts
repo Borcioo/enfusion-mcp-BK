@@ -6,8 +6,11 @@
  * handlers failed to compile — which is exactly when you need the logs most
  * (observed live: a broken Game module blocks all EMCP_* handlers).
  */
-import { readdirSync, statSync, openSync, readSync, closeSync } from "node:fs";
+import { readdirSync, statSync, openSync, readSync, closeSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
+import type { Config } from "../config.js";
+import { logger } from "../utils/logger.js";
 
 export interface CompileError {
   file: string;
@@ -78,4 +81,101 @@ export function readLogTail(
   if (opts.filter) lines = lines.filter(l => opts.filter!.test(l));
   if (opts.lines !== undefined) lines = lines.filter(Boolean).slice(-opts.lines);
   return { text: lines.join("\n"), endByte: size };
+}
+
+/**
+ * Parse compile errors that appeared in the log strictly after `beforeByte`
+ * (a cursor captured before some triggering action, e.g. a reload). Reads
+ * only the new bytes rather than the whole file.
+ */
+export function collectNewCompileErrors(
+  logDir: string,
+  beforeByte: number,
+  fileName = "console.log",
+): CompileError[] {
+  const { text } = readLogTail(logDir, { sinceByte: beforeByte, fileName });
+  return parseCompileErrors(text);
+}
+
+/** Candidate parent directories that hold logs_<timestamp> subfolders. */
+export function candidateLogBases(config: Config): string[] {
+  const candidates: string[] = [];
+  if (config.workbenchProfileDir) candidates.push(config.workbenchProfileDir);
+  candidates.push(
+    join(homedir(), "Documents", "My Games", "ArmaReforgerWorkbench", "logs"),
+    join(homedir(), "OneDrive", "Dokumenty", "My Games", "ArmaReforgerWorkbench", "logs"),
+    join(homedir(), "OneDrive", "Documents", "My Games", "ArmaReforgerWorkbench", "logs")
+  );
+  return candidates;
+}
+
+/** Resolve the first existing candidate logs base directory. */
+export function resolveLogsBase(config: Config): string | null {
+  for (const candidate of candidateLogBases(config)) {
+    if (existsSync(candidate)) {
+      logger.debug(`workbench logs: using logs base dir ${candidate}`);
+      return candidate;
+    }
+  }
+  return null;
+}
+
+/** Locate a script source file on disk to pull context lines around a compile error. */
+export function findSourceFile(config: Config, relFile: string): string | null {
+  const roots: string[] = [];
+  if (config.defaultMod) roots.push(join(config.projectPath, config.defaultMod));
+  roots.push(config.projectPath);
+
+  for (const root of roots) {
+    const candidate = join(root, relFile);
+    if (existsSync(candidate)) return candidate;
+  }
+
+  // Fall back to scanning immediate subdirectories of projectPath (addon folders)
+  try {
+    for (const entry of readdirSync(config.projectPath, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const candidate = join(config.projectPath, entry.name, relFile);
+      if (existsSync(candidate)) return candidate;
+    }
+  } catch {
+    // projectPath may not exist / be readable — ignore
+  }
+
+  return null;
+}
+
+/** Read up to `radius` lines of context before/after the 1-indexed error line. */
+export function readContext(filePath: string, line: number, radius = 5): string | null {
+  try {
+    const lines = readFileSync(filePath, "utf-8").split("\n");
+    const start = Math.max(0, line - 1 - radius);
+    const end = Math.min(lines.length, line + radius);
+    return lines
+      .slice(start, end)
+      .map((l, i) => {
+        const lineNo = start + i + 1;
+        const marker = lineNo === line ? ">>" : "  ";
+        return `${marker} ${lineNo}: ${l}`;
+      })
+      .join("\n");
+  } catch {
+    return null;
+  }
+}
+
+/** Format a list of compile errors as Markdown, with ±5-line source context when available. */
+export function formatCompileErrors(config: Config, logLabel: string, errors: CompileError[]): string {
+  const parts: string[] = [`**Compile Errors** (${logLabel})\n`];
+  for (const err of errors) {
+    parts.push(`- ${err.file}:${err.line}: ${err.message}`);
+    const sourcePath = findSourceFile(config, err.file);
+    if (sourcePath) {
+      const context = readContext(sourcePath, err.line);
+      if (context) parts.push("```\n" + context + "\n```");
+    } else {
+      parts.push(`  (source file not found for context: ${err.file})`);
+    }
+  }
+  return parts.join("\n");
 }

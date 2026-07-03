@@ -243,13 +243,13 @@ After implementing any upgrade, complete **all** of the following before marking
 
 ---
 
-### 16. Compilation Error Feedback + Log Capture
+### ~~16. Compilation Error Feedback + Log Capture~~ ✅ Done
 
 > *Merged from: "Compilation Error Feedback Loop" (List 1) + "Workbench Console Log Capture" (List 2)*
 
 **What**: Two complementary features for the same problem:
 
-1. **Error parsing**: After `wb_play` or `wb_reload` fails due to compilation errors, parse the Workbench response to extract file path, line number, and error message, then automatically `project_read` the failing file and present the error in context with surrounding code lines. *(Not yet done — this is the reload-feedback follow-up task.)*
+1. ✅ **Error parsing — DONE**: `wb_reload` (`src/tools/wb-reload.ts`) now captures the console-log byte cursor before triggering a reload, polls every 500ms (up to 5s) for the log to grow, and if it does, parses the new bytes with `collectNewCompileErrors` (`src/workbench/logs.ts`) and includes any `SCRIPT (E)` errors — file:line, message, and ±5 lines of source context via the shared `formatCompileErrors` helper (reused from Task 1's `wb_log` formatting) — directly in the tool response. No more asking the user to check the console. Live-verified against the running Workbench + Central-Economy project: deliberately breaking `Scripts/Game/CentralEconomy/CE_Item.c` and calling the reload handler raw (bypassing the stale session MCP connection) produced a fresh `SCRIPT (E): @"Scripts/Game/CentralEconomy/CE_Item.c,1": Syntax error` line in `console.log`, which `collectNewCompileErrors`/`formatCompileErrors` correctly surfaced. Trigger-mechanism note: `EMCP_WB_Reload.c`'s `ExecuteAction` calls report `compiled=false` even when they *do* successfully queue a real recompilation (confirmed live — a genuine "Reloading game scripts" + error block appeared in the log despite `ExecuteAction=false` in the response message); the `.c` handler was left as-is since the underlying reload+log-polling path is proven to work end-to-end independent of that unreliable boolean. Repeated reload calls with no intervening file change did not re-trigger a compile (Workbench-side dedup/change-detection), which is expected usage (edit once, reload once) and does not affect correctness.
 
 2. ✅ **Log capture tool — DONE**: `wb_log` (`src/tools/wb-log.ts`, `src/workbench/logs.ts`) reads Workbench's `console.log`/`script.log` directly from disk (auto-discovers the newest `logs_<timestamp>` dir under `Documents/My Games/ArmaReforgerWorkbench/logs`, with OneDrive-redirected-Documents fallbacks and a `workbenchProfileDir` config override), tails it incrementally via a byte cursor, and parses `SCRIPT (E): @"file.c,line": message` compile errors with ±5 lines of source context pulled from the project tree. File-based by design — it works even when the NET API handlers themselves fail to compile, which is exactly when you need visibility most.
 

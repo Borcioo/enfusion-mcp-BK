@@ -2,15 +2,29 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { deflateRawSync } from "node:zlib";
+import { deflateSync, deflateRawSync } from "node:zlib";
 import { PakVirtualFS } from "../../src/pak/vfs.js";
 
 /**
  * Build a minimal synthetic .pak file (same helper as reader.test.ts).
+ *
+ * IMPORTANT: real-world .pak files store each file entry's `offset` as an
+ * ABSOLUTE byte position within the .pak file (baked in by the pak builder
+ * at pack time), not an offset relative to the DATA chunk payload. This
+ * fixture mirrors that: entry offsets are computed against the DATA
+ * payload's absolute position in the final buffer (headLen is fixed below,
+ * so that absolute base is known up front). Compressed entries use zlib-
+ * wrapped deflate (deflateSync), matching PakVirtualFS.readFile's use of
+ * inflateSync.
  */
 function buildTestPak(files: Array<{ path: string; content: string; compress: boolean }>): Buffer {
   interface TreeFile { name: string; offset: number; compressedLen: number; decompressedLen: number; compressed: boolean }
   interface TreeDir { name: string; children: Map<string, TreeDir | TreeFile> }
+
+  const headLen = 0x1c;
+  // Absolute position where the DATA payload begins: FORM header (12) +
+  // HEAD chunk header+payload (8 + headLen) + DATA chunk header (8).
+  const dataPayloadAbsStart = 12 + 8 + headLen + 8;
 
   const dataChunks: Buffer[] = [];
   let dataOffset = 0;
@@ -18,7 +32,7 @@ function buildTestPak(files: Array<{ path: string; content: string; compress: bo
 
   for (const file of files) {
     const raw = Buffer.from(file.content, "utf-8");
-    const stored = file.compress ? deflateRawSync(raw) : raw;
+    const stored = file.compress ? deflateSync(raw) : raw;
 
     const parts = file.path.split("/");
     const fileName = parts.pop()!;
@@ -33,7 +47,7 @@ function buildTestPak(files: Array<{ path: string; content: string; compress: bo
     }
 
     dir.children.set(fileName, {
-      name: fileName, offset: dataOffset,
+      name: fileName, offset: dataPayloadAbsStart + dataOffset,
       compressedLen: stored.length, decompressedLen: raw.length,
       compressed: file.compress,
     });
@@ -76,7 +90,6 @@ function buildTestPak(files: Array<{ path: string; content: string; compress: bo
 
   const fileTreeBuf = serializeEntry(root);
   const dataPayload = Buffer.concat(dataChunks);
-  const headLen = 0x1c;
   const headPayload = Buffer.alloc(headLen);
 
   const totalPayload = 4 + 8 + headLen + 8 + dataPayload.length + 8 + fileTreeBuf.length;
@@ -220,5 +233,99 @@ describe("PakVirtualFS", () => {
     const a = PakVirtualFS.get(GAME_DIR);
     const b = PakVirtualFS.get(GAME_DIR);
     expect(a).toBe(b);
+  });
+});
+
+describe("PakVirtualFS regression: absolute offsets + zlib-wrapped compression", () => {
+  // Regression coverage for the "invalid block type" bug: entry.offset must be
+  // treated as an ABSOLUTE byte position within the .pak file, and compressed
+  // entries must be inflated as zlib-wrapped deflate (2-byte header + deflate
+  // + Adler-32), not raw/headerless deflate. Getting either wrong either
+  // throws a zlib error on compressed reads or silently reads/truncates the
+  // wrong bytes for uncompressed reads.
+  const REG_DIR = join(tmpdir(), "enfusion-mcp-vfs-regress-" + process.pid);
+  const REG_ADDONS = join(REG_DIR, "addons");
+
+  beforeAll(() => {
+    mkdirSync(REG_ADDONS, { recursive: true });
+    // Several files, mixing compressed/uncompressed, so a wrong offset base
+    // or wrong codec corrupts more than just the first entry.
+    const pak = buildTestPak([
+      { path: "a/first.c", content: "class First {}", compress: false },
+      {
+        path: "a/second.c",
+        content: "class Second { void Foo() {} void Bar() {} }".repeat(20),
+        compress: true,
+      },
+      { path: "a/third.c", content: "class Third {}", compress: false },
+      {
+        path: "a/fourth.c",
+        content: "class Fourth { int x; int y; int z; }".repeat(15),
+        compress: true,
+      },
+    ]);
+    writeFileSync(join(REG_ADDONS, "regress.pak"), pak);
+    (PakVirtualFS as any).instance = null;
+    (PakVirtualFS as any).instanceGamePath = null;
+  });
+
+  afterAll(() => {
+    (PakVirtualFS as any).instance = null;
+    (PakVirtualFS as any).instanceGamePath = null;
+    rmSync(REG_DIR, { recursive: true, force: true });
+  });
+
+  it("reads every entry — compressed and uncompressed, sequential — without truncation or zlib errors", () => {
+    const vfs = PakVirtualFS.get(REG_DIR)!;
+    expect(vfs.readTextFile("a/first.c")).toBe("class First {}");
+    expect(vfs.readTextFile("a/second.c")).toBe(
+      "class Second { void Foo() {} void Bar() {} }".repeat(20)
+    );
+    expect(vfs.readTextFile("a/third.c")).toBe("class Third {}");
+    expect(vfs.readTextFile("a/fourth.c")).toBe(
+      "class Fourth { int x; int y; int z; }".repeat(15)
+    );
+  });
+});
+
+describe("PakVirtualFS decompression codec (hand-built buffer)", () => {
+  // Focused unit test pinning the exact codec contract: readFile() must
+  // treat compressed pak entries as zlib-wrapped deflate (deflateSync
+  // output), not raw/headerless deflate (deflateRawSync output). A
+  // hand-built buffer using the wrong codec must fail loudly rather than
+  // silently produce garbage.
+  const CODEC_DIR = join(tmpdir(), "enfusion-mcp-vfs-codec-" + process.pid);
+  const CODEC_ADDONS = join(CODEC_DIR, "addons");
+
+  afterAll(() => {
+    rmSync(CODEC_DIR, { recursive: true, force: true });
+  });
+
+  it("rejects a raw-deflate (headerless) stream even though the compressed flag is set", () => {
+    mkdirSync(CODEC_ADDONS, { recursive: true });
+    const pak = buildTestPak([{ path: "bad.c", content: "class Bad {}", compress: true }]);
+
+    // Corrupt: overwrite the zlib-wrapped payload with a raw/headerless
+    // deflate stream of the same content, keeping compressedLen/decompressedLen
+    // metadata untouched. This simulates the exact bug this fix corrects
+    // (reader previously called inflateRawSync on zlib-wrapped data — here we
+    // invert it to prove readFile() now truly requires the zlib wrapper).
+    const raw = Buffer.from("class Bad {}", "utf-8");
+    const rawDeflated: Buffer = deflateRawSync(raw);
+
+    // Locate the zlib-wrapped payload inside the pak buffer and splice in the
+    // raw-deflate bytes at the same spot (DATA payload starts right after
+    // FORM+HEAD+DATA headers). We just need the first bytes to diverge from a
+    // valid zlib header so inflateSync rejects it.
+    const dataPayloadAbsStart = 12 + 8 + 0x1c + 8;
+    const patched = Buffer.from(pak);
+    rawDeflated.copy(patched, dataPayloadAbsStart, 0, Math.min(rawDeflated.length, patched.length - dataPayloadAbsStart));
+
+    writeFileSync(join(CODEC_ADDONS, "codec.pak"), patched);
+    (PakVirtualFS as any).instance = null;
+    (PakVirtualFS as any).instanceGamePath = null;
+
+    const vfs = PakVirtualFS.get(CODEC_DIR)!;
+    expect(() => vfs.readFile("bad.c")).toThrow(/Failed to decompress pak entry/);
   });
 });

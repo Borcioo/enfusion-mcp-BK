@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { WorkbenchClient } from "../workbench/client.js";
-import { formatConnectionStatus, requirePlayMode } from "../workbench/status.js";
+import { formatConnectionStatus } from "../workbench/status.js";
 
 interface GameStateEntity {
   className?: string;
@@ -102,7 +102,7 @@ export function registerWbGameState(server: McpServer, client: WorkbenchClient):
     "wb_game_state",
     {
       description:
-        "Inspect the live game world while Workbench is in PLAY mode (Play in Editor). Unlike every other wb_* tool, this ONLY works in PLAY mode — the World Editor API (WorldEditorAPI) is null there, so this tool uses the game-runtime GetGame()/GetWorld() API instead. Read-only. Actions: 'world_info' (world time, active entity count, player count), 'list_entities' (active entities in the world, filterable by className/prefabName substring, paginated, capped at 200 per call), 'players' (connected players with controlled-entity positions).",
+        "Inspect the live game world while Workbench is in PLAY mode (Play in Editor). Uses the game-runtime GetGame()/GetWorld() API, so it returns data only while the game is actually running; call wb_play first (if the game isn't running it reports mode 'no_game'). Read-only. Actions: 'world_info' (world time, active entity count, player count), 'list_entities' (active entities in the world, filterable by className/prefabName substring, paginated, capped at 200 per call), 'players' (connected players with controlled-entity positions).",
       inputSchema: {
         action: z
           .enum(["world_info", "list_entities", "players"])
@@ -117,11 +117,12 @@ export function registerWbGameState(server: McpServer, client: WorkbenchClient):
       },
     },
     async ({ action, nameFilter, offset, limit }) => {
-      const modeErr = requirePlayMode(client, "inspect game state");
-      if (modeErr) {
-        return { content: [{ type: "text" as const, text: modeErr + formatConnectionStatus(client) }] };
-      }
-
+      // No requirePlayMode guard: the cached editor mode is unreliable in
+      // Workbench "Play in Editor" (the World Editor module stays accessible
+      // while the game runs, so wb_state reports "edit" even in play). The
+      // handler detects the real runtime via GetGame()/GetWorld() and returns
+      // mode "no_game"/"game_no_world"/"game"; formatGameStateResult surfaces a
+      // "call wb_play first" message for the non-running cases.
       try {
         const params = buildGameStateParams({ action, nameFilter, offset, limit });
         const result = await client.call<GameStateResult>("EMCP_WB_GameState", params);

@@ -39,6 +39,18 @@ export interface ComponentSearchResult {
   score: number;
 }
 
+/**
+ * Type-string keywords/primitives that must never be treated as class-name
+ * references when extracting reverse "used by" relationships. Anything not
+ * in the index is also filtered out by `hasClass`, but this list keeps
+ * common generic/keyword tokens from ever being considered candidates.
+ */
+const PRIMITIVE_TYPE_TOKENS = new Set([
+  "void", "bool", "int", "float", "string", "vector", "auto",
+  "typename", "array", "map", "set", "ref", "out", "inout", "const",
+  "owned", "notnull", "sealed", "class", "true", "false",
+]);
+
 export class SearchEngine {
   private classByName: Map<string, ClassInfo> = new Map();
   private classNames: string[] = [];
@@ -49,6 +61,8 @@ export class SearchEngine {
   private wikiPageByTitle: Map<string, WikiPage> = new Map();
   private groups: GroupInfo[] = [];
   private componentIndex: ClassInfo[] = [];
+  /** Reverse index: referenced class (lowercase) -> set of referencing class names (as declared). */
+  private usedByIndex: Map<string, Set<string>> = new Map();
   private loaded = false;
 
   constructor(private dataDir: string) {
@@ -140,6 +154,37 @@ export class SearchEngine {
           classGroup: cls.group,
           property: prop,
         });
+      }
+    }
+
+    // Build the reverse "used by" index in a second pass — must run after
+    // classByName is fully populated so hasClass() can filter noise
+    // (primitives, generic keywords, classes that don't exist in the index).
+    for (const cls of allClasses) {
+      for (const parent of cls.parents || []) {
+        this.addUsedBy(parent, cls.name);
+      }
+
+      const allMethods = [
+        ...(cls.methods || []),
+        ...(cls.protectedMethods || []),
+        ...(cls.staticMethods || []),
+      ];
+      for (const method of allMethods) {
+        for (const typeName of this.extractTypeNames(method.returnType)) {
+          this.addUsedBy(typeName, cls.name);
+        }
+        for (const param of method.params || []) {
+          for (const typeName of this.extractTypeNames(param.type)) {
+            this.addUsedBy(typeName, cls.name);
+          }
+        }
+      }
+
+      for (const prop of [...(cls.properties || []), ...(cls.protectedProperties || [])]) {
+        for (const typeName of this.extractTypeNames(prop.type)) {
+          this.addUsedBy(typeName, cls.name);
+        }
       }
     }
 
@@ -882,6 +927,56 @@ export class SearchEngine {
    */
   hasClass(name: string): boolean {
     return this.classByName.has(name.toLowerCase());
+  }
+
+  /**
+   * Extract bare class-name candidates from a type string, stripping
+   * generic/template wrappers, `ref`/`array<>`/`[]`/`map<K,V>` syntax etc.
+   * Returns unique identifier-like tokens with primitive/keyword tokens
+   * removed. Callers are still expected to check `hasClass()` on the
+   * result, since this only strips *known* generic syntax, not arbitrary
+   * non-class identifiers.
+   */
+  private extractTypeNames(type: string | undefined): string[] {
+    if (!type) return [];
+    const matches = type.match(/[A-Za-z_][A-Za-z0-9_]*/g);
+    if (!matches) return [];
+    const seen = new Set<string>();
+    for (const m of matches) {
+      if (PRIMITIVE_TYPE_TOKENS.has(m.toLowerCase())) continue;
+      seen.add(m);
+    }
+    return [...seen];
+  }
+
+  /**
+   * Record that `referencerName` references `referencedName` (as parent,
+   * param type, return type, or property type). No-ops for self-references
+   * and for names that don't resolve to a real indexed class.
+   */
+  private addUsedBy(referencedName: string, referencerName: string): void {
+    if (!referencedName || !referencerName) return;
+    if (referencedName.toLowerCase() === referencerName.toLowerCase()) return;
+    if (!this.hasClass(referencedName)) return;
+
+    const key = referencedName.toLowerCase();
+    let set = this.usedByIndex.get(key);
+    if (!set) {
+      set = new Set();
+      this.usedByIndex.set(key, set);
+    }
+    set.add(referencerName);
+  }
+
+  /**
+   * Reverse lookup: classes that reference `name` as a parent, a method
+   * parameter type, a method return type, or a property type.
+   * Sorted alphabetically; empty array if nothing references this class.
+   */
+  getUsedBy(name: string): string[] {
+    const set = this.usedByIndex.get(name.toLowerCase());
+    if (!set) return [];
+    return [...set].sort((a, b) => a.localeCompare(b));
   }
 
   isLoaded(): boolean {

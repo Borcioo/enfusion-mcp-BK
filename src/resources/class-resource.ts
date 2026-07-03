@@ -40,6 +40,7 @@ export function registerClassResource(
       const tree = searchEngine.getClassTree(name);
       const chain = searchEngine.getInheritanceChain(name);
       const inherited = searchEngine.getInheritedMembers(name);
+      const usedBy = searchEngine.getUsedBy(name);
 
       return {
         contents: [
@@ -66,6 +67,7 @@ export function registerClassResource(
                 inheritedMethods: inherited.methods,
                 inheritedProperties: inherited.properties,
                 inheritedEnums: inherited.enums,
+                usedBy,
                 docsUrl: cls.docsUrl,
               },
               null,

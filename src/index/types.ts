@@ -75,6 +75,14 @@ export interface GroupInfo {
   name: string;
   description: string;
   classes: string[];
+  /**
+   * Enumerator types declared at group/file scope. Enfusion mostly declares
+   * enums outside of classes (in a group's "Enumerations" section) rather
+   * than nested inside a class — see doxygen-parser.ts parseGroupPage.
+   */
+  enums?: EnumInfo[];
+  /** Best-effort source classification ("enfusion" engine vs "arma" game code). */
+  source?: "enfusion" | "arma";
 }
 
 /** Inheritance hierarchy node */

@@ -2,9 +2,15 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseHierarchyPage, parseClassPage } from "../../src/scraper/doxygen-parser.js";
+import {
+  parseHierarchyPage,
+  parseClassPage,
+  parseAnnotatedPage,
+  parseGroupPage,
+} from "../../src/scraper/doxygen-parser.js";
 
 const fixturesDir = resolve(dirname(fileURLToPath(import.meta.url)), "../fixtures");
+const doxygenFixturesDir = resolve(fixturesDir, "doxygen");
 
 describe("parseHierarchyPage", () => {
   const html = readFileSync(resolve(fixturesDir, "sample-hierarchy.html"), "utf-8");
@@ -95,5 +101,112 @@ describe("parseClassPage inheritance (map-area heuristic)", () => {
     expect(cls.parents).not.toContain("GenericEntity");
     // No grandchildren in parents either
     expect(cls.parents).not.toContain("AutotestGrid");
+  });
+});
+
+// --- Fixtures below are REAL pages fetched from https://arexplorer.zeroy.com/
+// (Doxygen 1.17.0 mirror) on 2026-07-03, trimmed for size. See
+// docs/superpowers/plans/2026-07-03-faza-5-data-quality.md Task 3.
+
+describe("parseAnnotatedPage against real Doxygen 1.17.0 mirror output", () => {
+  const html = readFileSync(
+    resolve(doxygenFixturesDir, "real-annotated-sample.html"),
+    "utf-8"
+  );
+  const entries = parseAnnotatedPage(html);
+
+  it("parses class rows with name + url", () => {
+    expect(entries.length).toBeGreaterThan(100);
+    const am = entries.find((e) => e.name === "ActionManager");
+    expect(am).toBeDefined();
+    expect(am!.url).toBe("class_action_manager.html");
+  });
+
+  it("extracts the brief from td.desc for classes that have one", () => {
+    const am = entries.find((e) => e.name === "ActionManager");
+    expect(am!.brief).toContain(
+      "holds information about states of registered Contexts and Actions"
+    );
+  });
+});
+
+describe("parseClassPage against real Doxygen 1.17.0 mirror output", () => {
+  it("extracts the brief from div.contents > p (class with no members)", () => {
+    const html = readFileSync(
+      resolve(doxygenFixturesDir, "real-class-action-manager.html"),
+      "utf-8"
+    );
+    const cls = parseClassPage(html, "enfusion", "class_action_manager.html");
+    expect(cls.name).toBe("ActionManager");
+    expect(cls.brief).toContain(
+      "holds information about states of registered Contexts and Actions"
+    );
+  });
+
+  it("enriches method descriptions from the detailed memdoc section", () => {
+    // Doxygen 1.17.0 wraps memdoc INSIDE div.memitem (a sibling of h2.memtitle,
+    // not memdoc itself directly after the heading). The old `.next("div.memdoc")`
+    // selector misses this and leaves methods with only their short mdescRight text.
+    const html = readFileSync(
+      resolve(doxygenFixturesDir, "real-class-generic-entity.html"),
+      "utf-8"
+    );
+    const cls = parseClassPage(html, "enfusion", "class_generic_entity.html");
+    const method = [...cls.protectedMethods, ...cls.methods].find(
+      (m) => m.name === "_WB_AfterWorldUpdate"
+    );
+    expect(method).toBeDefined();
+    // The detailed memdoc text is much longer than the short mdescRight brief.
+    expect(method!.description).toContain(
+      "Called after updating world in Workbench"
+    );
+  });
+});
+
+describe("parseGroupPage enum extraction against real Doxygen 1.17.0 mirror output", () => {
+  const html = readFileSync(
+    resolve(doxygenFixturesDir, "real-group-core.html"),
+    "utf-8"
+  );
+  const group = parseGroupPage(html);
+
+  it("parses the group name", () => {
+    expect(group.name).toBe("Core");
+  });
+
+  it("extracts global enums declared in the group's enum-members section", () => {
+    expect(group.enums).toBeDefined();
+    const achievementId = group.enums!.find((e) => e.name === "AchievementId");
+    expect(achievementId).toBeDefined();
+  });
+
+  it("extracts enum values with names from the fieldtable", () => {
+    const achievementId = group.enums!.find((e) => e.name === "AchievementId");
+    const names = achievementId!.values.map((v) => v.name);
+    expect(names).toContain("COMBAT_HYGIENE");
+    expect(names).toContain("NUTCRACKER");
+  });
+});
+
+import { deriveBrief } from "../../src/scraper/doxygen-parser.js";
+
+describe("deriveBrief", () => {
+  it("cleans an explicit brief: strips 'More...' and leading class name", () => {
+    expect(
+      deriveBrief("ActionManager holds information about states. More...", "", "ActionManager")
+    ).toBe("holds information about states.");
+  });
+  it("falls back to first sentence of description when brief is empty", () => {
+    expect(
+      deriveBrief("", "GenericEntity is a base entity. It has more detail here.", "GenericEntity")
+    ).toBe("is a base entity.");
+  });
+  it("returns empty string when both are empty", () => {
+    expect(deriveBrief("", "", "X")).toBe("");
+  });
+  it("does not strip class name when it is not a leading prefix", () => {
+    expect(deriveBrief("", "Holds ActionManager references.", "ActionManager")).toBe(
+      "Holds ActionManager references."
+    );
   });
 });

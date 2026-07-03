@@ -40,6 +40,29 @@ export function parseAnnotatedPage(
 }
 
 /**
+ * Derive a clean one-line brief for a class.
+ *
+ * Prefers the explicit brief paragraph, but the current Doxygen (1.17.0) rarely
+ * emits one, so it falls back to the first sentence of the detailed description.
+ * Strips the Doxygen "More..." read-more suffix and a leading duplicated class
+ * name (Doxygen prefixes many briefs with the class name itself).
+ */
+export function deriveBrief(rawBrief: string, description: string, className: string): string {
+  let text = (rawBrief || description || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  // Drop the "More..." read-more link Doxygen appends to the brief.
+  text = text.replace(/\s*More\.\.\.\s*$/i, "").trim();
+  // Take the first sentence (up to the first period followed by space/end).
+  const sentenceMatch = text.match(/^(.*?\.)(?:\s|$)/);
+  if (sentenceMatch) text = sentenceMatch[1].trim();
+  // Strip a leading duplicated class name ("ActionManager holds ..." -> "holds ...").
+  if (className && text.startsWith(className + " ")) {
+    text = text.slice(className.length + 1).trim();
+  }
+  return text;
+}
+
+/**
  * Parse a single class/interface detail page (interface[Name].html).
  */
 export function parseClassPage(
@@ -61,10 +84,7 @@ export function parseClassPage(
   // Extract group from ingroups div
   const group = $("div.ingroups a.el").first().text().trim();
 
-  // Extract brief description - the first paragraph after the content div
-  const brief = $("div.contents > p").first().text().trim();
-
-  // Extract detailed description
+  // Extract detailed description (Doxygen 1.17.0 puts the class doc in div.textblock)
   const detailSection = $("div.textblock");
   const description = detailSection.length
     ? detailSection
@@ -72,6 +92,14 @@ export function parseClassPage(
         .get()
         .join("\n\n")
     : "";
+
+  // Extract brief description. The legacy `div.contents > p` selector no longer
+  // matches the current Doxygen (1.17.0) HTML — the brief text lives inside
+  // div.textblock alongside the detail. Fall back to the first sentence of the
+  // description so brief coverage tracks description coverage (~100%) instead of
+  // the ~6% the bare-<p> selector yields.
+  const rawBrief = $("div.contents > p").first().text().trim();
+  const brief = deriveBrief(rawBrief, description, name);
 
   // Extract inheritance from the image map
   const parents: string[] = [];
@@ -267,7 +295,10 @@ function parseMemberTable(
     if (rowClass.startsWith("memitem:")) {
       const returnType = $row.find("td.memItemLeft").text().trim();
       const rightCell = $row.find("td.memItemRight");
-      const nameLink = rightCell.find("a.el");
+      // .first(): the right cell can contain multiple a.el links (the member
+      // name plus, for methods, linked param types like `float`) — only the
+      // first is the member's own name link.
+      const nameLink = rightCell.find("a.el").first();
       const methodName = nameLink.text().trim();
 
       if (!methodName) return;
@@ -381,7 +412,7 @@ function parsePropertyTable(
     if (rowClass.startsWith("memitem:")) {
       const propType = $row.find("td.memItemLeft").text().trim();
       const rightCell = $row.find("td.memItemRight");
-      const nameLink = rightCell.find("a.el");
+      const nameLink = rightCell.find("a.el").first();
       const propName = nameLink.text().trim() || rightCell.text().trim();
 
       if (!propName) return;
@@ -403,15 +434,19 @@ function parsePropertyTable(
 }
 
 /**
- * Parse enum type definitions from the pub-types section and their detail docs.
- * Doxygen lists enum names in the pub-types member table, and their values
- * appear in detail sections with <table class="fieldtable"> or <dl> lists.
+ * Parse enum type definitions from a member-table section and their detail docs.
+ * Doxygen lists enum names in a member table (e.g. "pub-types"/"pro-types" on
+ * class pages, or "enum-members" on group/module pages — Enfusion mostly
+ * declares enums at file/group scope, not nested in classes), and their
+ * values appear in detail sections with <table class="fieldtable"> or <dl> lists.
  */
-function parseEnumSection($: cheerio.CheerioAPI): EnumInfo[] {
+function parseEnumSection(
+  $: cheerio.CheerioAPI,
+  sectionIds: string[] = ["pub-types", "pro-types"]
+): EnumInfo[] {
   const enums: EnumInfo[] = [];
 
-  // Look for pub-types section (could also be pro-types)
-  for (const sectionId of ["pub-types", "pro-types"]) {
+  for (const sectionId of sectionIds) {
     const headingAnchor = $(`a#${sectionId}`);
     if (!headingAnchor.length) continue;
 
@@ -442,7 +477,10 @@ function parseEnumSection($: cheerio.CheerioAPI): EnumInfo[] {
       if (rowClass.startsWith("memitem:")) {
         const leftText = $row.find("td.memItemLeft").text().trim();
         const rightCell = $row.find("td.memItemRight");
-        const nameLink = rightCell.find("a.el");
+        // .first(): the right cell also contains a.el links for every inline
+        // enum value (e.g. "AchievementId { COMBAT_HYGIENE, NUTCRACKER, ... }")
+        // — only the first link is the enum's own name.
+        const nameLink = rightCell.find("a.el").first();
         const enumName = nameLink.text().trim();
 
         // Only process enum types (skip typedefs, classes)
@@ -481,14 +519,21 @@ function parseEnumValuesFromBrief(
 ): EnumValue[] {
   const values: EnumValue[] = [];
 
-  // Strategy 1: Look for detailed documentation with fieldtable
-  // Doxygen puts enum detail in a memdoc div keyed by the member anchor hash
-  const detailAnchor = $(`a#${memberHash}`).closest("div.memdoc");
-  // Fallback: try memtitle sibling
-  const memtitle = $(`a[id="${memberHash}"]`).closest("h2.memtitle");
-  const memdoc = detailAnchor.length
-    ? detailAnchor
-    : memtitle.next("div.memdoc");
+  // Strategy 1: Look for detailed documentation with fieldtable.
+  // Doxygen puts enum detail in a memdoc div keyed by the member anchor hash.
+  // Layout (Doxygen 1.13+ and 1.17+):
+  //   <a id="HASH"></a>
+  //   <h2 class="memtitle">...</h2>
+  //   <div class="memitem">
+  //     <div class="memproto">...</div>
+  //     <div class="memdoc">...fieldtable...</div>
+  //   </div>
+  // memdoc is NOT a direct sibling of the anchor/heading — it is nested
+  // inside the following div.memitem sibling.
+  const anchor = $(`a[id="${memberHash}"]`).first();
+  const memdoc = anchor.length
+    ? anchor.nextAll("div.memitem").first().find("div.memdoc").first()
+    : $();
 
   if (memdoc.length) {
     const fieldTable = memdoc.find("table.fieldtable");
@@ -568,7 +613,14 @@ function enrichMethodDescriptions(
   // Build a map of method names to their memdoc contents
   $("h2.memtitle").each((_i, heading) => {
     const $heading = $(heading);
-    const memdoc = $heading.next("div.memdoc");
+    // memdoc is nested inside the following div.memitem sibling, not a
+    // direct sibling of the heading itself (see parseEnumValuesFromBrief
+    // for the same Doxygen layout note).
+    const memdoc = $heading
+      .nextAll("div.memitem")
+      .first()
+      .find("div.memdoc")
+      .first();
     if (!memdoc.length) return;
 
     // Extract method name from the heading text (strip permalink spans)
@@ -717,14 +769,17 @@ export function parseGroupPage(html: string): GroupInfo {
   const description = $("div.contents div.textblock").first().text().trim();
 
   const classes: string[] = [];
-  $("table.memberdecls tr.memitem\\:").each((_i, row) => {
-    // These are actually compound rows for classes in the group
-  });
 
-  // Alternative: look for links to interface pages in the member declarations
+  // Look for links to class/interface detail pages in the member declarations.
+  // Older Doxygen (local zip data, ~1.13.x) names these "interface[Name].html";
+  // the current arexplorer.zeroy.com remote mirror (Doxygen 1.17.0) names them
+  // "class_snake_case.html" instead. Support both.
   $("table.memberdecls a.el").each((_i, link) => {
     const href = $(link).attr("href") || "";
-    if (href.startsWith("interface") && href.endsWith(".html")) {
+    if (
+      (href.startsWith("interface") || href.startsWith("class_")) &&
+      href.endsWith(".html")
+    ) {
       const className = $(link).text().trim();
       if (className && !classes.includes(className)) {
         classes.push(className);
@@ -732,7 +787,12 @@ export function parseGroupPage(html: string): GroupInfo {
     }
   });
 
-  return { name, description, classes };
+  // Enfusion mostly declares enums at group/file scope rather than nested
+  // in a class — they show up in this group page's "Enumerations" member
+  // table (section id "enum-members"), not on the class detail pages.
+  const enums = parseEnumSection($, ["enum-members"]);
+
+  return { name, description, classes, enums };
 }
 
 /**

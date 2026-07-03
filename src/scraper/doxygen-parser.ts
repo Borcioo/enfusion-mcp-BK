@@ -43,23 +43,49 @@ export function parseAnnotatedPage(
  * Derive a clean one-line brief for a class.
  *
  * Prefers the explicit brief paragraph, but the current Doxygen (1.17.0) rarely
- * emits one, so it falls back to the first sentence of the detailed description.
- * Strips the Doxygen "More..." read-more suffix and a leading duplicated class
- * name (Doxygen prefixes many briefs with the class name itself).
+ * emits one, so it falls back to the first sentence of the detailed description
+ * — ONLY when that sentence is genuine prose. Most classes are undocumented and
+ * their description is just Doxygen boilerplate ("Definition at line N of file
+ * X.c.") or an "@example" code/path block; deriving a brief from that produces
+ * misleading junk, so isBoilerplateBrief() rejects it and we return "" (honest
+ * "no brief" for undocumented classes). Also strips the "More..." read-more
+ * suffix and a leading duplicated class name.
  */
+export function isBoilerplateBrief(text: string): boolean {
+  if (!text) return true;
+  const t = text.trim();
+  // Doxygen's auto "Definition at line N of file X.ext" boilerplate.
+  if (/^Definition at line \d+ of file /i.test(t)) return true;
+  // Leading "@example"/"Examples" section or a bare file path grabbed as a sentence.
+  if (/^Examples?\b/.test(t)) return true;
+  // Looks like a Windows/Unix file path or a source filename rather than prose.
+  if (/[A-Za-z]:[\\/]/.test(t) || /\/[\w./-]+\.\w+/.test(t)) return true;
+  if (/\.(c|et|conf|layout|xob|paa|emat)\b/i.test(t) && !t.includes(" ")) return true;
+  // A single token with no spaces is not a description.
+  if (!t.includes(" ")) return true;
+  return false;
+}
+
 export function deriveBrief(rawBrief: string, description: string, className: string): string {
-  let text = (rawBrief || description || "").replace(/\s+/g, " ").trim();
-  if (!text) return "";
-  // Drop the "More..." read-more link Doxygen appends to the brief.
-  text = text.replace(/\s*More\.\.\.\s*$/i, "").trim();
-  // Take the first sentence (up to the first period followed by space/end).
-  const sentenceMatch = text.match(/^(.*?\.)(?:\s|$)/);
-  if (sentenceMatch) text = sentenceMatch[1].trim();
-  // Strip a leading duplicated class name ("ActionManager holds ..." -> "holds ...").
-  if (className && text.startsWith(className + " ")) {
-    text = text.slice(className.length + 1).trim();
+  const cleanFirstSentence = (raw: string): string => {
+    let text = (raw || "").replace(/\s+/g, " ").trim();
+    if (!text) return "";
+    text = text.replace(/\s*More\.\.\.\s*$/i, "").trim();
+    const sentenceMatch = text.match(/^(.*?\.)(?:\s|$)/);
+    if (sentenceMatch) text = sentenceMatch[1].trim();
+    if (className && text.startsWith(className + " ")) {
+      text = text.slice(className.length + 1).trim();
+    }
+    return text;
+  };
+
+  // Prefer an explicit brief if it's real prose; else try the description's
+  // first sentence; reject boilerplate in either case.
+  for (const candidate of [rawBrief, description]) {
+    const s = cleanFirstSentence(candidate);
+    if (s && !isBoilerplateBrief(s)) return s;
   }
-  return text;
+  return "";
 }
 
 /**

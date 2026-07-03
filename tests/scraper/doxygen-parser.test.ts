@@ -210,3 +210,23 @@ describe("deriveBrief", () => {
     );
   });
 });
+
+import { isBoilerplateBrief } from "../../src/scraper/doxygen-parser.js";
+
+describe("deriveBrief boilerplate rejection", () => {
+  it("rejects Doxygen 'Definition at line N of file' boilerplate", () => {
+    expect(deriveBrief("", "Definition at line 7 of file AddonBuildInfoTool.c.", "AddonBuildInfoTool")).toBe("");
+  });
+  it("rejects an Examples/file-path first sentence", () => {
+    expect(deriveBrief("", "ExamplesF:/Games/AReforger/scripts/Game/GameMode/SCR_GameModeEditor.c.", "SCR_BaseGameMode")).toBe("");
+  });
+  it("keeps a genuine prose brief", () => {
+    expect(deriveBrief("", "Holds information about states of registered Contexts and Actions.", "ActionManager")).toBe(
+      "Holds information about states of registered Contexts and Actions."
+    );
+  });
+  it("isBoilerplateBrief flags boilerplate and passes prose", () => {
+    expect(isBoilerplateBrief("Definition at line 3 of file X.c.")).toBe(true);
+    expect(isBoilerplateBrief("Manages the player inventory.")).toBe(false);
+  });
+});

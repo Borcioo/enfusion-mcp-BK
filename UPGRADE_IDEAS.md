@@ -417,13 +417,13 @@ After implementing any upgrade, complete **all** of the following before marking
 
 ---
 
-### 26. Component Compatibility Matrix
+### 26. Component Compatibility Matrix ✅
 
-**What**: Build a mapping of which components commonly co-occur on entity types in the base game. Add a `type: "components"` search mode to `api_search` that, given an entity type (e.g., `GenericEntity`, `SCR_ChimeraCharacter`), returns which components are typically attached. Derive this by scanning base game `.et` files during asset indexing.
+**What**: Build a mapping of which components commonly co-occur on entity types in the base game. Added an `entityType` parameter to `component_search` that, given an entity type (e.g., `GenericEntity`, `SCR_ChimeraCharacter`), returns which components are typically attached, ranked by co-occurrence count/frequency. Derived by scanning base game `.et` files (loose + `.pak`) and parsing each prefab's root entity type + `components { ... }` block.
 
-**Where**: `src/tools/asset-search.ts` (extend indexing), new data structure in `src/index/`
+**Where**: `src/index/component-matrix.ts` (pure extraction/aggregation), `src/utils/component-matrix-cache.ts` (mtime-invalidated persistent cache, sibling to `asset-index-cache.ts`), `src/tools/component-search.ts` (scanning + `entityType`/`refresh` params)
 
-**Why**: Enfusion components have implicit compatibility rules (some require others, some conflict). The LLM frequently attaches incompatible components — e.g., putting `WeaponComponent` on a `GenericEntity` without the required `BaseWeaponManagerComponent`. A compatibility matrix derived from base game prefabs would prevent this.
+**Why**: Enfusion components have implicit compatibility rules (some require others, some conflict). The LLM frequently attaches incompatible components — e.g., putting `WeaponComponent` on a `GenericEntity` without the required `BaseWeaponManagerComponent`. A compatibility matrix derived from base game prefabs prevents this. The matrix is built once and persisted to disk (fingerprinted by loose-file mtimes + `.pak` mtime/size, same pattern as the asset index cache) so repeat calls don't rescan tens of thousands of `.et` files; a corrupt/stale cache rebuilds gracefully.
 
 **Effort**: L
 
@@ -460,7 +460,7 @@ After implementing any upgrade, complete **all** of the following before marking
 | ~~23~~ | ~~Multi-Mod Workspace Support~~ ✅ | M | Modder Workflow | L1 |
 | 24 | ~~Diff-Based Script Patching~~ ✅ Done | M-L | Power Feature | L1+L2 merged |
 | 25 | Cross-Reference Validation on Write | L | Hallucination Prevention | L1 |
-| 26 | Component Compatibility Matrix | L | Hallucination Prevention | L1 |
+| ~~26~~ | ~~Component Compatibility Matrix~~ ✅ | L | Hallucination Prevention | L1 |
 
 ---
 

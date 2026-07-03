@@ -1,0 +1,86 @@
+[
+  {
+    "id": "modded-class-is-global",
+    "title": "A `modded class` is a global override, not a local patch",
+    "detail": "`modded class SCR_Foo { ... }` affects every instance of SCR_Foo in the entire game/session, for every mod loaded — not just code paths your mod touches. Overriding a method here changes behavior everywhere that method is called, including other mods and vanilla systems. Always call `super.MethodName()` unless you specifically intend to fully replace the base behavior.",
+    "appliesWhen": {
+      "scriptType": ["modded"],
+      "keywords": ["modded class", "override", "super."]
+    }
+  },
+  {
+    "id": "frame-event-requires-setmask",
+    "title": "EntityEvent.FRAME (EOnFrame) does nothing without SetEventMask",
+    "detail": "Implementing `EOnFrame()` alone is not enough — the entity/component will never receive per-frame updates unless you first call `SetEventMask(owner, EntityEvent.FRAME)` (e.g. in `EOnInit`). Verified in the API index: `SetEventMask(notnull IEntity owner, int mask)` exists on component base classes like GenericComponent — it must be called explicitly to opt in to frame ticking.",
+    "appliesWhen": {
+      "keywords": ["onframe", "eonframe", "entityevent.frame", "frame event", "per-frame", "every frame", "tick"],
+      "events": ["FRAME"]
+    }
+  },
+  {
+    "id": "ref-keyword-reference-types",
+    "title": "Use `ref` for reference-counted class instances held in fields",
+    "detail": "Enforce Script class instances are reference-counted; a member variable holding a script class instance (not an EntityID/IEntity handle) should be declared with the `ref` keyword (e.g. `ref array<int> m_aList;`, `ref MyClass m_Obj;`). Omitting `ref` on containers/collections or owned object references can lead to premature garbage collection or dangling references.",
+    "appliesWhen": {
+      "keywords": ["ref keyword", "reference type", "array<", "map<", "garbage collect", "dangling"]
+    }
+  },
+  {
+    "id": "scripts-outside-module-folder",
+    "title": "Scripts outside a valid module folder are silently ignored",
+    "detail": "Enforce Script files must live under a recognized module directory (e.g. `Scripts/Game/`) matching the addon's `.gproj` module declarations. A `.c` file placed elsewhere compiles to nothing — no error, no warning, it is just never loaded. Always create scripts via the module-aware path (see `getScriptModuleFolder`) and verify with `mod_validate`.",
+    "appliesWhen": {
+      "scriptType": ["component", "gamemode", "action", "entity", "manager", "modded", "basic"],
+      "keywords": ["scripts/gamelib", "module folder", "not loading", "silently ignored"]
+    }
+  },
+  {
+    "id": "workbenchgame-handlers-no-hot-reload",
+    "title": "WorkbenchGame-module handler scripts do NOT hot-reload",
+    "detail": "Handler scripts injected under the WorkbenchGame module (used for NET API access during wb_launch) are only picked up on Workbench startup. Editing them and calling wb_reload will NOT pick up the changes — you need a full Workbench restart (wb_stop, close, wb_launch again) for handler-script edits to take effect. Regular addon scripts (Scripts/Game/) do hot-reload fine via wb_reload.",
+    "appliesWhen": {
+      "keywords": ["workbenchgame", "handler script", "hot reload", "hot-reload", "wb_reload", "wb_launch"]
+    }
+  },
+  {
+    "id": "getplayermanager-on-chimeragame",
+    "title": "GetPlayerManager() lives on ChimeraGame, not the base Game class",
+    "detail": "`GetPlayerManager()` is declared on `ChimeraGame`, not on the generic `Game`/`GetGame()` return type. If you call `GetGame().GetPlayerManager()` without casting, it will fail to resolve. Cast first: `ChimeraGame game = ChimeraGame.Cast(GetGame()); PlayerManager pm = game.GetPlayerManager();`. Verified in the API index.",
+    "appliesWhen": {
+      "keywords": ["getplayermanager", "playermanager", "getgame()", "chimeragame"]
+    }
+  },
+  {
+    "id": "meshobject-required-for-visibility",
+    "title": "Entities need a MeshObject component to be visible",
+    "detail": "Any entity meant to appear in the game world must have a MeshObject component with its `Object` property pointing to a real `.xob` model. Without it the entity is completely invisible and has no collision — this includes prop-like entities, spawn markers, and custom placed objects.",
+    "appliesWhen": {
+      "scriptType": ["entity"],
+      "keywords": ["meshobject", "invisible", "no model", "spawn point", "placed item"]
+    }
+  },
+  {
+    "id": "api-verification-required",
+    "title": "Never call an Enfusion API method you have not verified via api_search",
+    "detail": "The Enfusion scripting API is non-standard and sparsely documented; plausible-sounding methods (e.g. `HitZone.SetHealth()`, `IEntity.GetVelocity()`) frequently do not exist. Calling an unverified method compiles silently in some cases but fails at runtime, or fails to compile with an unhelpful error. Always look the class up with api_search first and only use methods that appear in the result set (inherited methods are included automatically).",
+    "appliesWhen": {
+      "keywords": ["api_search", "unverified", "does not exist", "hallucinat"]
+    }
+  },
+  {
+    "id": "prefab-text-serialization",
+    "title": "Prefab (.et) files use Enfusion text serialization, not JSON",
+    "detail": "Entity prefab files (`.et`) are Enfusion's own text-serialization format, structurally similar to but not JSON. Hand-editing them (e.g. via project_write) requires matching the existing indentation/brace structure exactly — malformed prefabs can fail to load in Workbench without a clear error.",
+    "appliesWhen": {
+      "keywords": ["prefab", ".et file", "text serialization", "project_write"]
+    }
+  },
+  {
+    "id": "class-prefix-consistency",
+    "title": "Use a single, consistent class prefix across the whole mod",
+    "detail": "Enfusion has no namespacing — all class names share one global identifier space across the entire game, including other mods. Pick one short prefix (e.g. `ZS_` for a Zombie Survival mod) and apply it consistently to every new class, to avoid collisions with vanilla or other mods' classes.",
+    "appliesWhen": {
+      "keywords": ["class prefix", "naming collision", "namespace"]
+    }
+  }
+]

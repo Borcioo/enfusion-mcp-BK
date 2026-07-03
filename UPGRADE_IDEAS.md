@@ -161,7 +161,9 @@ After implementing any upgrade, complete **all** of the following before marking
 
 ---
 
-### 11. Duplicate Code Consolidation: project_browse & game_browse
+### ~~11. Duplicate Code Consolidation: project_browse & game_browse~~ ✅ Done
+
+> Shared logic extracted to `src/utils/dir-listing.ts` (`listDirectory`, `FILE_TYPE_MAP`, `getFileType`, `formatSize`, `DirEntry`). Both `src/tools/game-browse.ts` and `src/tools/project.ts` (the file is named `project.ts`, not `project-browse.ts`) import from it. `FILE_TYPE_MAP` is now the union of both prior maps, so `project` browsing also labels `.emat`/`.sounds`. Covered by `tests/utils/dir-listing.test.ts`.
 
 **What**: Extract the shared `listDirectory()`, `FILE_TYPE_MAP`, `formatSize()`, and `DirEntry` logic into a common utility. Both `project-browse.ts` and `game-browse.ts` have near-identical implementations (compare `src/tools/project-browse.ts:8-91` with `src/tools/game-browse.ts:9-81`).
 
@@ -425,7 +427,7 @@ After implementing any upgrade, complete **all** of the following before marking
 | 8 | Class Hierarchy Visualization | S | Developer Experience | L2 |
 | 9 | Config Validation (Semantic) | S | UX Polish | L2 |
 | 10 | Dry-Run Mode for Mutation Tools | S | UX Polish | L2 |
-| 11 | Duplicate Code Consolidation | S | Developer Experience | L2 |
+| ~~11~~ | ~~Duplicate Code Consolidation~~ ✅ | S | Developer Experience | L2 |
 | 12 | Fuzzy Search + Trigram Matching | M | Context Quality | L1+L2 merged |
 | 13 | Method Signature Validator | M | Hallucination Prevention | L1 |
 | 14 | Auto-Fetch Parent Methods | M | Composability | L1 |

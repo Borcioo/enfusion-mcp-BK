@@ -197,9 +197,11 @@ After implementing any upgrade, complete **all** of the following before marking
 
 ---
 
-### 13. Method Signature Validator Tool
+### 13. Method Signature Validator Tool — DONE
 
 **What**: Add a `script_check` tool that takes a class name + method signature and verifies it exists in the API index, returning the correct signature if there's a close match (Levenshtein/fuzzy). Gives the LLM a lightweight "did I get this right?" check without re-searching the entire class.
+
+**Status**: Implemented in `src/tools/script-check.ts`, registered in `src/server.ts`, tested in `tests/tools/script-check.test.ts`. Inheritance-aware via `SearchEngine.getInheritedMembers()`; fuzzy matching reuses `src/utils/fuzzy.ts` (`levenshtein`, `trigramSimilarity`).
 
 **Why**: 88% of methods lack descriptions. The LLM writes `override void OnPlayerSpawned(int playerId, IEntity entity)` but the real signature has `IEntity controlledEntity`. The prompt says "verify every method" but there's no ergonomic single-method verification tool — `api_search` returns full class dumps, making verification expensive in tokens.
 

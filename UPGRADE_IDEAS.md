@@ -333,7 +333,7 @@ After implementing any upgrade, complete **all** of the following before marking
 
 ---
 
-### 21. MODPLAN as Structured Data
+### ~~21. MODPLAN as Structured Data~~ ✅ Done (PR #20)
 
 **What**: Replace the freeform markdown MODPLAN.md with a structured JSON/YAML format that tools can read and write programmatically. Add a `mod_plan` tool that can query plan status, mark phases complete, and generate the next phase's task list.
 
@@ -451,7 +451,7 @@ After implementing any upgrade, complete **all** of the following before marking
 | ~~18~~ | ~~Common Pitfalls Context Injection~~ ✅ | M | Hallucination Prevention | L1 |
 | ~~19~~ | ~~Validation-Driven Fix Suggestions~~ ✅ Done | M | Power Feature | L2 |
 | 20 | Cross-Index "Used By" Backlinks | M | Power Feature | L2 |
-| 21 | MODPLAN as Structured Data | M | Power Feature | L2 |
+| ~~21~~ | ~~MODPLAN as Structured Data~~ ✅ | M | Power Feature | L2 |
 | 22 | Incremental Asset Index | M | Developer Experience | L2 |
 | ~~23~~ | ~~Multi-Mod Workspace Support~~ ✅ | M | Modder Workflow | L1 |
 | 24 | ~~Diff-Based Script Patching~~ ✅ Done | M-L | Power Feature | L1+L2 merged |

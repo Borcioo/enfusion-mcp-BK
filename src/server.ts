@@ -6,6 +6,7 @@ import { registerWikiSearch } from "./tools/wiki-search.js";
 import { registerWikiRead } from "./tools/wiki-read.js";
 import { registerProject } from "./tools/project.js";
 import { registerProjectPatch } from "./tools/project-patch.js";
+import { registerModPlan } from "./tools/mod-plan.js";
 import { registerScriptCreate } from "./tools/script-create.js";
 import { registerPrefab } from "./tools/prefab.js";
 import { registerMod } from "./tools/mod.js";
@@ -66,6 +67,7 @@ export function registerTools(server: McpServer, config: Config): void {
   registerWikiRead(server, searchEngine);
   registerProject(server, config);
   registerProjectPatch(server, config);
+  registerModPlan(server, config);
 
   // Phase 1 tools
   registerMod(server, config, searchEngine, patterns);

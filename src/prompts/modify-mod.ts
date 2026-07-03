@@ -31,7 +31,7 @@ YOU ARE FULLY AUTONOMOUS. You have all the tools to modify the mod AND set it up
 
 Follow this workflow — every step is mandatory:
 
-1. **Read the plan** — Use **project_read** to check for a \`MODPLAN.md\` file in the project root.
+1. **Read the plan** — Use **mod_plan** (action \`read\`/\`status\`) for a structured \`MODPLAN.json\`, or **project_read** to check for a freeform \`MODPLAN.md\` file in the project root.
    - If it exists: this is a phased project. Read the plan carefully. It contains the full mod vision, what's been completed, what's pending, architecture notes, class prefixes, and file names. Use this as your primary context. If the user's task matches the next pending phase, execute that phase. If it's a different task, still respect the existing architecture.
    - If it doesn't exist: this is either a simple mod or one created before planning was added. Proceed normally.
 

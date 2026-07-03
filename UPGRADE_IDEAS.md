@@ -147,7 +147,7 @@ After implementing any upgrade, complete **all** of the following before marking
 
 ---
 
-### 10. Dry-Run Mode for Mutation Tools
+### ~~10. Dry-Run Mode for Mutation Tools~~ ✅ Done
 
 **What**: Add a `dryRun: boolean` parameter to `mod_create`, `script_create`, `prefab_create`, `config_create`, `layout_create`, and `project_write`. When true, return what *would* be created/modified without writing to disk.
 
@@ -158,6 +158,8 @@ After implementing any upgrade, complete **all** of the following before marking
 **Effort**: S
 
 **Category**: UX Polish
+
+**Resolution**: Every mutating tool (`mod` create action, `script_create`, `prefab` create action, `config_create`, `layout_create`, `project` write action) now accepts `dryRun: z.boolean().default(false)`. When true, no `writeFileSync`/`mkdirSync` call happens; the tool instead returns a `**[dry-run]**`-prefixed preview built by the shared `formatDryRun()` helper in `src/utils/dry-run.ts`, listing every planned path with content where applicable. Covered by `tests/tools/dry-run.test.ts` (one dry-run + one regression test per tool) and `tests/utils/dry-run.test.ts` (helper unit tests).
 
 ---
 

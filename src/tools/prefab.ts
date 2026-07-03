@@ -17,6 +17,7 @@ import {
   type AncestorLevel,
 } from "../utils/prefab-ancestry.js";
 import { validateFilename } from "../utils/safe-path.js";
+import { formatDryRun } from "../utils/dry-run.js";
 
 // ── Inspect helpers ────────────────────────────────────────────────────────────
 
@@ -78,7 +79,7 @@ export function registerPrefab(server: McpServer, config: Config): void {
         "Create or inspect Arma Reforger prefab (.et) files.\n\n" +
         "action=create: Create a new Entity Template (.et) prefab file for an Arma Reforger mod. Generates a properly structured prefab with components in valid Enfusion text serialization format. " +
         "When parentPrefab is provided, automatically resolves the full ancestor chain and pre-populates inherited components (set includeAncestry=false to skip). " +
-        "IMPORTANT: For 'interactive' and other visible prefabs, the MeshObject component MUST have its 'Object' property set to a base game .xob model path (e.g., '{5F4C4181F065B447}Assets/Props/Military/Barrels/BarrelGreen_01.xob') or the entity will be invisible in-game. Use api_search to find model paths.\n\n" +
+        "IMPORTANT: For 'interactive' and other visible prefabs, the MeshObject component MUST have its 'Object' property set to a base game .xob model path (e.g., '{5F4C4181F065B447}Assets/Props/Military/Barrels/BarrelGreen_01.xob') or the entity will be invisible in-game. Use api_search to find model paths. Supports dryRun to preview without writing.\n\n" +
         "action=inspect: Inspect an Arma Reforger prefab (.et file) and its full inheritance chain. " +
         "Reads each ancestor prefab, parses all components, and returns a fully merged view " +
         "showing which ancestor each component comes from. " +
@@ -165,13 +166,19 @@ export function registerPrefab(server: McpServer, config: Config): void {
           .string()
           .optional()
           .describe("Addon root path / mod project root. Uses configured default if omitted."),
+        dryRun: z
+          .boolean()
+          .default(false)
+          .describe(
+            "(create) Preview what would be created/written without touching disk — returns the target paths and content instead of writing."
+          ),
       },
     },
     async (params) => {
       const { action } = params;
 
       if (action === "create") {
-        const { name, prefabType, variant, parentPrefab, components, description, includeAncestry, projectPath } = params;
+        const { name, prefabType, variant, parentPrefab, components, description, includeAncestry, projectPath, dryRun } = params;
         const basePath = projectPath || config.projectPath;
 
         try {
@@ -249,6 +256,21 @@ export function registerPrefab(server: McpServer, config: Config): void {
             const filename = getPrefabFilename(name);
             const targetDir = resolve(basePath, subdir);
             const targetPath = join(targetDir, filename);
+
+            if (dryRun) {
+              const variantTag = variant ? ` (variant: ${variant})` : "";
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: formatDryRun(
+                      [{ path: `${subdir}/${filename}`, content }],
+                      `Prefab preview (${prefabType}${variantTag}) — nothing was written.`
+                    ) + checklist + ancestryNote,
+                  },
+                ],
+              };
+            }
 
             mkdirSync(targetDir, { recursive: true });
 

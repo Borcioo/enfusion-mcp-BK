@@ -10,6 +10,7 @@ import type { PatternLibrary } from "../patterns/loader.js";
 import { validateFilename, validateProjectPath } from "../utils/safe-path.js";
 import type { SearchEngine } from "../index/search-engine.js";
 import { parse, getProperty } from "../formats/enfusion-text.js";
+import { formatDryRun, type DryRunFile } from "../utils/dry-run.js";
 
 // ─── build helpers ────────────────────────────────────────────────────────────
 
@@ -395,7 +396,7 @@ export function registerMod(
     "mod",
     {
       description:
-        "Manage Arma Reforger addons: build with the Workbench CLI, scaffold a new addon, or validate an existing addon without building.",
+        "Manage Arma Reforger addons: build with the Workbench CLI, scaffold a new addon, or validate an existing addon without building. action='create' supports dryRun to preview the scaffold without writing.",
       inputSchema: {
         action: z
           .enum(["build", "create", "validate"])
@@ -456,9 +457,17 @@ export function registerMod(
           .array(z.enum(["structure", "gproj", "scripts", "prefabs", "configs", "references", "naming"]))
           .optional()
           .describe("(validate) Specific checks to run. Runs all checks if omitted."),
+
+        // ── create params (continued) ─────────────────────────────────────────
+        dryRun: z
+          .boolean()
+          .default(false)
+          .describe(
+            "(create) Preview what would be created/written without touching disk — returns the target paths and content instead of writing."
+          ),
       },
     },
-    async ({ action, addonName, platform, outputPath, gprojPath, filterPath, name, description, prefix, pattern: patternName, projectPath, checks }) => {
+    async ({ action, addonName, platform, outputPath, gprojPath, filterPath, name, description, prefix, pattern: patternName, projectPath, checks, dryRun }) => {
 
       // ── build ──────────────────────────────────────────────────────────────
       if (action === "build") {
@@ -627,6 +636,7 @@ export function registerMod(
 
         try {
           const createdFiles: string[] = [];
+          const plannedFiles: DryRunFile[] = [];
 
           // Create directory structure
           const dirs = [
@@ -640,18 +650,21 @@ export function registerMod(
             join(addonDir, "UI"),
             join(addonDir, "Worlds"),
           ];
-          for (const dir of dirs) {
-            mkdirSync(dir, { recursive: true });
+          if (!dryRun) {
+            for (const dir of dirs) {
+              mkdirSync(dir, { recursive: true });
+            }
           }
 
-          // Generate and write .gproj
+          // Generate and (unless dryRun) write .gproj
           const gprojContent = generateGproj({
             name,
             title: name,
           });
           const gprojFilePath = join(addonDir, `${name}.gproj`);
-          writeFileSync(gprojFilePath, gprojContent, "utf-8");
+          if (!dryRun) writeFileSync(gprojFilePath, gprojContent, "utf-8");
           createdFiles.push(`${name}.gproj`);
+          plannedFiles.push({ path: gprojFilePath, content: gprojContent });
 
           // Apply pattern if specified (already validated above)
           if (patternName) {
@@ -699,8 +712,9 @@ export function registerMod(
                 description: scriptDef.description,
               });
               const scriptPath = join(addonDir, "Scripts", "Game", `${className}.c`);
-              writeFileSync(scriptPath, code, "utf-8");
+              if (!dryRun) writeFileSync(scriptPath, code, "utf-8");
               createdFiles.push(`Scripts/Game/${className}.c`);
+              plannedFiles.push({ path: scriptPath, content: code });
             }
 
             // Create prefab subdirectories from pattern
@@ -708,7 +722,7 @@ export function registerMod(
               const prefabName = prefabDef.name.replace(/\{PREFIX\}/g, classPrefix);
               // Ensure directory exists (prefabs go in type-specific subdirs)
               const prefabDir = join(addonDir, "Prefabs");
-              mkdirSync(prefabDir, { recursive: true });
+              if (!dryRun) mkdirSync(prefabDir, { recursive: true });
               // Note: prefab file generation is done via prefab_create tool for full control
               createdFiles.push(`(Use prefab_create for: ${prefabName})`);
             }
@@ -718,10 +732,31 @@ export function registerMod(
               const configName = configDef.name.replace(/\{PREFIX\}/g, classPrefix);
               const configContent = configDef.content.replace(/\{PREFIX\}/g, classPrefix);
               const targetPath = join(addonDir, "Configs", `${configName}.conf`);
-              mkdirSync(resolve(targetPath, ".."), { recursive: true });
-              writeFileSync(targetPath, configContent, "utf-8");
+              if (!dryRun) {
+                mkdirSync(resolve(targetPath, ".."), { recursive: true });
+                writeFileSync(targetPath, configContent, "utf-8");
+              }
               createdFiles.push(`Configs/${configName}.conf`);
+              plannedFiles.push({ path: targetPath, content: configContent });
             }
+          }
+
+          if (dryRun) {
+            const previewFiles: DryRunFile[] = [
+              ...dirs.map((d) => ({ path: d })),
+              ...plannedFiles,
+            ];
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: formatDryRun(
+                    previewFiles,
+                    `Addon scaffold preview for "${name}" — nothing was written.`
+                  ),
+                },
+              ],
+            };
           }
 
           // Build response

@@ -365,7 +365,7 @@ After implementing any upgrade, complete **all** of the following before marking
 
 ---
 
-### 24. Diff-Based Script Patching (Read-Modify-Write)
+### ~~24. Diff-Based Script Patching (Read-Modify-Write)~~ ✅ Done
 
 > *Merged from: "Diff-Based Project Write" (List 1) + "Smart Script Patching" (List 2)*
 
@@ -442,7 +442,7 @@ After implementing any upgrade, complete **all** of the following before marking
 | 21 | MODPLAN as Structured Data | M | Power Feature | L2 |
 | 22 | Incremental Asset Index | M | Developer Experience | L2 |
 | 23 | Multi-Mod Workspace Support | M | Modder Workflow | L1 |
-| 24 | Diff-Based Script Patching | M-L | Power Feature | L1+L2 merged |
+| 24 | ~~Diff-Based Script Patching~~ ✅ Done | M-L | Power Feature | L1+L2 merged |
 | 25 | Cross-Reference Validation on Write | L | Hallucination Prevention | L1 |
 | 26 | Component Compatibility Matrix | L | Hallucination Prevention | L1 |
 

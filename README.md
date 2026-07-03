@@ -103,6 +103,7 @@ Work without Workbench running — API search, mod scaffolding, code generation,
 | `project_browse` | List files in a mod project directory |
 | `project_read` | Read any project file |
 | `project_write` | Write or update project files (supports `dryRun` to preview without writing) |
+| `project_patch` | Apply diff-style find-and-replace edits to a project file without rewriting the whole thing — mirrors Claude Code's Edit tool semantics (`oldString` must match exactly once unless `replaceAll` is set; all edits are atomic; supports `dryRun` to preview) |
 | `mod_create` | Scaffold a complete addon with directory structure and `.gproj` (supports `dryRun` to preview without writing) |
 | `script_create` | Generate Enforce Script (`.c`) files — 7 types: component, gamemode, action, entity, manager, modded, basic. Auto-fetches overridable parent methods from API index when `parentClass` is specified (supports `dryRun` to preview without writing) |
 | `prefab_create` | Generate Entity Template (`.et`) prefabs — 7 types: character, vehicle, weapon, spawnpoint, gamemode, interactive, generic (supports `dryRun` to preview without writing) |

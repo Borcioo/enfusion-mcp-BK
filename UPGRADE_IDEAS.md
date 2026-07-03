@@ -425,6 +425,8 @@ After implementing any upgrade, complete **all** of the following before marking
 
 **Why**: Enfusion components have implicit compatibility rules (some require others, some conflict). The LLM frequently attaches incompatible components — e.g., putting `WeaponComponent` on a `GenericEntity` without the required `BaseWeaponManagerComponent`. A compatibility matrix derived from base game prefabs prevents this. The matrix is built once and persisted to disk (fingerprinted by loose-file mtimes + `.pak` mtime/size, same pattern as the asset index cache) so repeat calls don't rescan tens of thousands of `.et` files; a corrupt/stale cache rebuilds gracefully.
 
+**Known limitation (intentional, documented)**: the matrix counts only LOCALLY-DECLARED components per `.et` file — `.et` prefab inheritance (`EntityClass : "{GUID}Parent.et" { ... }`) is not resolved, so entity types built mostly through inheritance (few local overrides) are undercounted relative to their true, fully-resolved component set. Full ancestry resolution across the whole base-game prefab set (GUID -> path resolution over ~84k files, for every scanned prefab) was judged disproportionate to the value here; locally-declared co-occurrence is still a useful "commonly declared on this entity type" signal. See the docstring on `extractEntityComponents` in `src/index/component-matrix.ts` for the full rationale, and `src/utils/prefab-ancestry.ts` for the (per-prefab, on-demand) ancestry resolver used elsewhere.
+
 **Effort**: L
 
 **Category**: Hallucination Prevention

@@ -244,10 +244,15 @@ function formatTypicalComponents(entityType: string, ranked: ReturnType<typeof g
     return `No component data found for entity type "${entityType}". It may not appear in any scanned base-game .et prefab, or the name doesn't match exactly (entity type names are case-sensitive, e.g. "GenericEntity", "SCR_ChimeraCharacter", "Vehicle").`;
   }
   const lines: string[] = [];
-  lines.push(`Typical components for entity type "${entityType}" (${ranked.length} distinct components found):\n`);
+  lines.push(
+    `Components commonly declared directly on entity type "${entityType}" (${ranked.length} distinct components found):\n`
+  );
   for (const r of ranked) {
     lines.push(`- ${r.component} — ${r.count} prefab${r.count !== 1 ? "s" : ""} (${Math.round(r.frequency * 100)}%)`);
   }
+  lines.push(
+    `\nNote: counts are of components declared directly in each .et file's own components { ... } block. Components inherited from a parent prefab (via "EntityClass : \\"{GUID}Parent.et\\" { ... }") are not resolved or included here — this is a "commonly declared on" signal, not an exhaustive/fully-resolved component list.`
+  );
   return lines.join("\n");
 }
 
@@ -257,7 +262,7 @@ export function registerComponentSearch(server: McpServer, searchEngine: SearchE
     {
       description:
         "Search for Enfusion ScriptComponent descendants — the building blocks you attach to entities in prefabs. Filter by category (character, vehicle, weapon, damage, inventory, ai, ui, editor, camera, sound, general) and/or by event handler name (e.g., 'OnPlayerConnected', 'EOnFrame', 'OnDamage'). Use this when you need to find what component to attach to an entity to achieve specific functionality. " +
-        "Alternatively, pass 'entityType' (e.g. 'GenericEntity', 'SCR_ChimeraCharacter', 'Vehicle') to get the components typically found on that entity type, mined from base-game .et prefabs — useful for avoiding incompatible-component mistakes when building a new prefab.",
+        "Alternatively, pass 'entityType' (e.g. 'GenericEntity', 'SCR_ChimeraCharacter', 'Vehicle') to get the components typically found on that entity type, mined from base-game .et prefabs — useful for avoiding incompatible-component mistakes when building a new prefab. NOTE: results reflect components DECLARED DIRECTLY on each .et file (local components { ... } block); components inherited from a parent prefab (EntityClass : \"{GUID}Parent.et\" { ... }) are NOT resolved/included, so entity types that lean heavily on inheritance may show fewer components than they actually end up with at runtime.",
       inputSchema: {
         query: z
           .string()

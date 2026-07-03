@@ -13,7 +13,11 @@ import {
   __getMatrixBuildCountForTest,
 } from "../../src/tools/component-search.js";
 import { PakVirtualFS } from "../../src/pak/vfs.js";
-import { getComponentMatrixCacheFilePath } from "../../src/utils/component-matrix-cache.js";
+import {
+  getComponentMatrixCacheFilePath,
+  loadPersistedComponentMatrix,
+  savePersistedComponentMatrix,
+} from "../../src/utils/component-matrix-cache.js";
 
 const dataDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../data");
 const searchEngine = new SearchEngine(dataDir);
@@ -208,5 +212,40 @@ describe("component_search entityType mode", () => {
     const afterRefresh = __getMatrixBuildCountForTest();
 
     expect(afterRefresh).toBe(afterFirst + 1);
+  });
+});
+
+describe("component matrix cache schema validation", () => {
+  it("rejects a persisted cache whose looseFingerprint values are not numbers", () => {
+    const { gamePath, basePath } = makeGameDirs();
+
+    // Write a structurally-valid but semantically-corrupt cache: looseFingerprint
+    // values must be numbers (mtimes), but this one has a string.
+    savePersistedComponentMatrix({
+      basePath,
+      gamePath,
+      looseFingerprint: { "some/file.et": "not-a-number" as unknown as number },
+      pakFingerprints: [],
+      matrix: {},
+    });
+
+    const loaded = loadPersistedComponentMatrix(basePath, gamePath);
+    expect(loaded).toBeNull();
+  });
+
+  it("accepts a persisted cache whose looseFingerprint values are all numbers", () => {
+    const { gamePath, basePath } = makeGameDirs();
+
+    savePersistedComponentMatrix({
+      basePath,
+      gamePath,
+      looseFingerprint: { "some/file.et": 12345 },
+      pakFingerprints: [],
+      matrix: {},
+    });
+
+    const loaded = loadPersistedComponentMatrix(basePath, gamePath);
+    expect(loaded).not.toBeNull();
+    expect(loaded!.looseFingerprint).toEqual({ "some/file.et": 12345 });
   });
 });

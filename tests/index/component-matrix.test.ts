@@ -41,6 +41,17 @@ const NO_COMPONENTS_ENTITY = `GenericEntity {
   ID "abc"
 }`;
 
+// An .et that inherits from a parent prefab via `EntityClass : "{GUID}Parent.et" { ... }`
+// and declares only an override/addition in its own components block. Real base-game
+// prefabs commonly look like this — most of their effective components come from the
+// parent chain and are never re-declared locally.
+const INHERITING_ENTITY = `SCR_ChimeraCharacter : "{1234567890ABCDEF}BaseCharacter.et" {
+  components {
+   NewComp "{9999999999999999}" {
+   }
+  }
+}`;
+
 describe("extractEntityComponents", () => {
   it("extracts entity type and component class names from a .et file", () => {
     const result = extractEntityComponents(WEAPON_1);
@@ -62,6 +73,18 @@ describe("extractEntityComponents", () => {
 
   it("returns null for empty text", () => {
     expect(extractEntityComponents("")).toBeNull();
+  });
+
+  // Documents/locks the current, intentional local-only behavior: inherited
+  // components from a parent prefab (`EntityClass : "{GUID}Parent.et" { ... }`)
+  // are NOT resolved. Only the locally-declared override/addition is recorded.
+  // See the docstring on extractEntityComponents for the rationale.
+  it("records only locally-declared components for an .et that inherits from a parent prefab", () => {
+    const result = extractEntityComponents(INHERITING_ENTITY);
+    expect(result).not.toBeNull();
+    expect(result!.entityType).toBe("SCR_ChimeraCharacter");
+    // Only NewComp — components inherited from BaseCharacter.et are not included.
+    expect(result!.components).toEqual(["NewComp"]);
   });
 });
 
@@ -91,6 +114,18 @@ describe("buildComponentMatrix", () => {
 
   it("returns an empty matrix for no input", () => {
     expect(buildComponentMatrix([])).toEqual({});
+  });
+
+  it("does not resolve inherited components from a parent .et prefab, only local overrides", () => {
+    const matrix = buildComponentMatrix([INHERITING_ENTITY]);
+    const entry = matrix["SCR_ChimeraCharacter"];
+    expect(entry.fileCount).toBe(1);
+    expect(Object.keys(entry.components)).toEqual(["NewComp"]);
+    // Components that would only exist via BaseCharacter.et's ancestry (e.g.
+    // CharacterAnimationComponent, MeshObject from CHARACTER_1-style base prefabs)
+    // are absent — this is the documented local-only behavior, not a bug.
+    expect(entry.components["CharacterAnimationComponent"]).toBeUndefined();
+    expect(entry.components["MeshObject"]).toBeUndefined();
   });
 });
 

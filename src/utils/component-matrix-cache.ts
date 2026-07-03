@@ -50,6 +50,7 @@ export function loadPersistedComponentMatrix(
       !data.looseFingerprint ||
       typeof data.looseFingerprint !== "object" ||
       Array.isArray(data.looseFingerprint) ||
+      !Object.values(data.looseFingerprint).every((v) => typeof v === "number") ||
       !Array.isArray(data.pakFingerprints)
     ) {
       logger.warn(`Component matrix cache schema mismatch at ${filePath}, ignoring`);

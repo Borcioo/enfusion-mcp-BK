@@ -6,6 +6,12 @@
  * component class names) via the Enfusion text parser, and folds them into
  * a co-occurrence count. Scanning the filesystem/.pak archives and caching
  * the result live in src/tools/component-search.ts + src/utils/component-matrix-cache.ts.
+ *
+ * SCOPE NOTE: counts are of LOCALLY-DECLARED components only — .et prefab
+ * inheritance (`EntityClass : "{GUID}Parent.et" { ... }`) is NOT resolved.
+ * See the docstring on `extractEntityComponents` below for the rationale.
+ * Treat matrix results as "components commonly declared directly on this
+ * entity type", not as an exhaustive/fully-resolved component set.
  */
 import { parse } from "../formats/enfusion-text.js";
 
@@ -40,6 +46,30 @@ export interface RankedComponent {
  * component classes listed in its top-level `components { ... }` block.
  * Returns null if the text does not parse as a valid Enfusion node (e.g.
  * corrupt/binary/unexpected content) — callers should skip such files.
+ *
+ * IMPORTANT — LOCAL COMPONENTS ONLY, INHERITANCE IS NOT RESOLVED:
+ * .et prefabs commonly inherit from a parent prefab via
+ * `EntityClass : "{GUID}Path/To/Parent.et" { components { ... } }` and, in
+ * that case, typically declare only the components they *add or override* —
+ * the rest are inherited silently from the parent chain (see
+ * src/utils/prefab-ancestry.ts, which exists precisely to resolve that
+ * chain for a single prefab on demand). This function does NOT walk that
+ * chain: it only reports components declared directly in this file's own
+ * `components { ... }` block. Entity types built mostly through deep
+ * inheritance (declaring few local overrides) will therefore be
+ * undercounted relative to their true, fully-resolved component set.
+ *
+ * This is an intentional, documented trade-off, not an oversight:
+ * 1. Resolving ancestry for every .et in the matrix would require
+ *    GUID -> path resolution across the full ~84k-file base-game asset
+ *    set for every prefab scanned, which is disproportionately expensive
+ *    for a "typically attached components" heuristic.
+ * 2. Locally-declared co-occurrence is still a useful signal on its own:
+ *    it answers "what do authors commonly add directly to this entity
+ *    type" rather than "what is the exhaustive, fully-resolved component
+ *    set for this entity type." Callers (and the LLM consuming tool
+ *    output) should treat matrix results as "commonly declared on X",
+ *    not as an exhaustive/authoritative component list for X.
  */
 export function extractEntityComponents(etText: string): EntityComponents | null {
   let node;
